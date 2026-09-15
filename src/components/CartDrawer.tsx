@@ -1,0 +1,311 @@
+import React, { useState } from 'react';
+import {
+  X,
+  ShoppingBag,
+  Trash2,
+  Plus,
+  Minus,
+  Tag,
+  ArrowRight,
+  Truck,
+  Store,
+  CheckCircle2,
+  AlertCircle,
+} from 'lucide-react';
+import { CartItem, Coupon, DeliveryType, DeliveryZone, PricingBreakdown } from '../types';
+
+interface CartDrawerProps {
+  isOpen: boolean;
+  onClose: () => void;
+  items: CartItem[];
+  pricing: PricingBreakdown;
+  onUpdateQuantity: (cartItemId: string, newQty: number) => void;
+  onRemoveItem: (cartItemId: string) => void;
+  deliveryType: DeliveryType;
+  onChangeDeliveryType: (type: DeliveryType) => void;
+  deliveryZones: DeliveryZone[];
+  selectedZoneId: string;
+  onChangeZoneId: (zoneId: string) => void;
+  couponCodeInput: string;
+  onChangeCouponCode: (code: string) => void;
+  onApplyCoupon: (code: string) => void;
+  couponMessage?: { text: string; isError: boolean } | null;
+  onProceedToCheckout: () => void;
+}
+
+export const CartDrawer: React.FC<CartDrawerProps> = ({
+  isOpen,
+  onClose,
+  items,
+  pricing,
+  onUpdateQuantity,
+  onRemoveItem,
+  deliveryType,
+  onChangeDeliveryType,
+  deliveryZones,
+  selectedZoneId,
+  onChangeZoneId,
+  couponCodeInput,
+  onChangeCouponCode,
+  onApplyCoupon,
+  couponMessage,
+  onProceedToCheckout,
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-hidden bg-black/50 backdrop-blur-xs flex justify-end">
+      <div
+        id="carrinho-drawer"
+        className="w-full max-w-md bg-[#FFFFFF] border-l border-[#3A2E1F]/15 flex flex-col h-full shadow-2xl animate-slideLeft"
+      >
+        {/* Drawer Header */}
+        <div className="p-4 sm:p-5 border-b border-[#3A2E1F]/10 flex items-center justify-between bg-[#F9F6F0]">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-[#B8623F]/10 text-[#B8623F] flex items-center justify-center">
+              <ShoppingBag className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="font-serif font-bold text-lg text-[#3A2E1F]">Sua Cesta de Pães</h2>
+              <span className="text-xs text-[#7E6C58]">
+                {pricing.items_count} {pricing.items_count === 1 ? 'item' : 'itens'} adicionados
+              </span>
+            </div>
+          </div>
+          <button
+            id="btn-fechar-carrinho"
+            onClick={onClose}
+            className="p-2 text-[#7E6C58] hover:text-[#3A2E1F] hover:bg-black/5 rounded-full transition-colors cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Drawer Content */}
+        {items.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <div className="w-20 h-20 rounded-full bg-[#FAF7F0] border border-[#3A2E1F]/10 flex items-center justify-center text-[#B7A05E] mb-4">
+              <ShoppingBag className="w-10 h-10 opacity-70" />
+            </div>
+            <h3 className="font-serif font-bold text-xl text-[#3A2E1F]">Sua cesta está vazia</h3>
+            <p className="text-xs text-[#7E6C58] mt-1.5 max-w-xs leading-relaxed">
+              O aroma da fornada de hoje espera por você! Explore nossos pães e folhados artesanais.
+            </p>
+            <button
+              onClick={onClose}
+              className="mt-6 px-6 py-2.5 bg-[#B8623F] hover:bg-[#994E30] text-white rounded-xl text-xs font-semibold shadow-xs"
+            >
+              Explorar Cardápio
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Scrollable Items list */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 divide-y divide-[#3A2E1F]/10">
+              {items.map((item) => (
+                <div key={item.id} className="pt-3 first:pt-0 flex gap-3.5 items-start">
+                  <img
+                    src={item.product.image_url}
+                    alt={item.product.name}
+                    className="w-16 h-16 rounded-xl object-cover border border-[#3A2E1F]/10 shrink-0 bg-[#FAF7F0]"
+                  />
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-start gap-1">
+                      <h4 className="font-bold text-xs sm:text-sm text-[#3A2E1F] leading-snug line-clamp-1">
+                        {item.product.name}
+                      </h4>
+                      <button
+                        onClick={() => onRemoveItem(item.id)}
+                        className="text-xs text-red-500 hover:text-red-700 p-1"
+                        title="Remover item"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Selected Options */}
+                    {item.selected_options.length > 0 && (
+                      <div className="text-[11px] text-[#7E6C58] mt-0.5 space-y-0.5">
+                        {item.selected_options.map((opt, idx) => (
+                          <span key={idx} className="block">
+                            • {opt.value_name}
+                            {opt.price_modifier > 0 && ` (+R$ ${opt.price_modifier.toFixed(2)})`}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {item.notes && (
+                      <p className="text-[11px] italic text-[#7E6C58] mt-0.5">
+                        Obs: "{item.notes}"
+                      </p>
+                    )}
+
+                    {/* Price and quantity controls */}
+                    <div className="mt-2.5 flex items-center justify-between">
+                      <span className="font-serif font-bold text-sm text-[#3A2E1F]">
+                        R$ {item.total_item_price.toFixed(2).replace('.', ',')}
+                      </span>
+
+                      <div className="flex items-center border border-[#3A2E1F]/15 rounded-lg bg-[#FAF7F0] p-0.5">
+                        <button
+                          onClick={() => onUpdateQuantity(item.id, item.quantity - 1)}
+                          className="p-1 rounded text-[#3A2E1F] hover:bg-black/5"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <span className="px-2 text-xs font-bold text-[#3A2E1F] min-w-6 text-center">
+                          {item.quantity}
+                        </span>
+                        <button
+                          onClick={() => onUpdateQuantity(item.id, item.quantity + 1)}
+                          className="p-1 rounded text-[#3A2E1F] hover:bg-black/5"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Delivery Option Toggle */}
+            <div className="p-4 bg-[#FAF7F0] border-t border-[#3A2E1F]/10 space-y-3">
+              <div className="grid grid-cols-2 gap-2 p-1 bg-white border border-[#3A2E1F]/15 rounded-xl">
+                <button
+                  onClick={() => onChangeDeliveryType('DELIVERY')}
+                  className={`py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    deliveryType === 'DELIVERY'
+                      ? 'bg-[#B8623F] text-white shadow-2xs'
+                      : 'text-[#7E6C58] hover:text-[#3A2E1F]'
+                  }`}
+                >
+                  <Truck className="w-3.5 h-3.5" />
+                  <span>Entrega em Casa</span>
+                </button>
+                <button
+                  onClick={() => onChangeDeliveryType('PICKUP')}
+                  className={`py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    deliveryType === 'PICKUP'
+                      ? 'bg-[#3A2E1F] text-[#F3ECDD] shadow-2xs'
+                      : 'text-[#7E6C58] hover:text-[#3A2E1F]'
+                  }`}
+                >
+                  <Store className="w-3.5 h-3.5" />
+                  <span>Retirada no Balcão</span>
+                </button>
+              </div>
+
+              {/* Delivery Zone selection if delivery */}
+              {deliveryType === 'DELIVERY' && (
+                <div className="space-y-1">
+                  <label className="block text-[11px] font-bold text-[#3A2E1F]">
+                    Região de Entrega (Taxa Calculada)
+                  </label>
+                  <select
+                    value={selectedZoneId}
+                    onChange={(e) => onChangeZoneId(e.target.value)}
+                    className="w-full text-xs p-2 rounded-xl border border-[#3A2E1F]/20 bg-white text-[#3A2E1F] focus:outline-none focus:ring-1 focus:ring-[#B8623F]"
+                  >
+                    {deliveryZones.map((z) => (
+                      <option key={z.id} value={z.id}>
+                        {z.name} — R$ {z.fee.toFixed(2).replace('.', ',')} ({z.estimated_minutes} min)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Coupon Code Section */}
+              <div className="space-y-1.5 pt-1">
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Tag className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#7E6C58]" />
+                    <input
+                      id="input-cupom-carrinho"
+                      type="text"
+                      placeholder="Cupom (ex: AFFETO10)"
+                      value={couponCodeInput}
+                      onChange={(e) => onChangeCouponCode(e.target.value.toUpperCase())}
+                      className="w-full pl-8 pr-2 py-2 text-xs rounded-xl border border-[#3A2E1F]/20 bg-white text-[#3A2E1F] uppercase tracking-wider focus:outline-none focus:ring-1 focus:ring-[#B8623F]"
+                    />
+                  </div>
+                  <button
+                    id="btn-aplicar-cupom"
+                    onClick={() => onApplyCoupon(couponCodeInput)}
+                    className="px-3.5 py-2 bg-[#3A2E1F] text-[#F3ECDD] rounded-xl text-xs font-semibold hover:bg-[#554432] transition-colors cursor-pointer"
+                  >
+                    Aplicar
+                  </button>
+                </div>
+
+                {couponMessage && (
+                  <p
+                    className={`text-[11px] flex items-center gap-1 ${
+                      couponMessage.isError ? 'text-red-600' : 'text-emerald-700 font-medium'
+                    }`}
+                  >
+                    {couponMessage.isError ? (
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    ) : (
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                    <span>{couponMessage.text}</span>
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Financial Summary & Checkout Button */}
+            <div className="p-4 sm:p-5 bg-white border-t border-[#3A2E1F]/15 space-y-3">
+              <div className="space-y-1.5 text-xs text-[#554432]">
+                <div className="flex justify-between">
+                  <span>Subtotal dos produtos</span>
+                  <span className="font-medium text-[#3A2E1F]">
+                    R$ {pricing.subtotal.toFixed(2).replace('.', ',')}
+                  </span>
+                </div>
+
+                {pricing.discount > 0 && (
+                  <div className="flex justify-between text-emerald-700 font-medium">
+                    <span>Desconto ({pricing.coupon_code})</span>
+                    <span>- R$ {pricing.discount.toFixed(2).replace('.', ',')}</span>
+                  </div>
+                )}
+
+                <div className="flex justify-between">
+                  <span>
+                    Taxa de entrega ({deliveryType === 'DELIVERY' ? 'Entrega' : 'Retirada'})
+                  </span>
+                  <span className="font-medium text-[#3A2E1F]">
+                    {pricing.delivery_fee === 0
+                      ? 'Grátis'
+                      : `R$ ${pricing.delivery_fee.toFixed(2).replace('.', ',')}`}
+                  </span>
+                </div>
+
+                <div className="pt-2 border-t border-[#3A2E1F]/10 flex justify-between items-baseline">
+                  <span className="font-serif font-bold text-base text-[#3A2E1F]">Total Final</span>
+                  <span className="font-serif font-bold text-xl text-[#B8623F]">
+                    R$ {pricing.total.toFixed(2).replace('.', ',')}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                id="btn-avancar-checkout"
+                onClick={onProceedToCheckout}
+                className="w-full py-3.5 bg-[#B8623F] hover:bg-[#994E30] text-white font-semibold text-sm rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <span>Avançar para Agendamento</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};

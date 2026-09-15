@@ -1,0 +1,6 @@
+{
+  "name": "Affeto Pães",
+  "description": "Padaria artesanal de fermentação natural - catálogo de pães, bolos, salgados, pedidos com entrega agendada e painel administrativo",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
