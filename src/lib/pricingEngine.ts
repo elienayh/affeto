@@ -2,12 +2,39 @@ import {
   CartItem,
   CartItemOptionSelection,
   Coupon,
+  DeliveryCepRule,
   DeliveryType,
   DeliveryZone,
   PricingBreakdown,
   Product,
   StoreSettings,
 } from '../types';
+
+export function matchDeliveryCep(
+  rawCep: string,
+  cepRules: DeliveryCepRule[] = []
+): DeliveryCepRule | null {
+  if (!rawCep) return null;
+  const digits = rawCep.replace(/\D/g, '');
+  if (!digits) return null;
+
+  // 1. Procura correspondência exata de 8 dígitos
+  const exact = cepRules.find(
+    (r) => r.active && r.cep.replace(/\D/g, '') === digits
+  );
+  if (exact) return exact;
+
+  // 2. Procura por prefixo de 5 dígitos (ex: 01419 cobre a região de 01419-xxx)
+  if (digits.length >= 5) {
+    const prefix = digits.substring(0, 5);
+    const prefixMatch = cepRules.find(
+      (r) => r.active && r.cep.replace(/\D/g, '').startsWith(prefix)
+    );
+    if (prefixMatch) return prefixMatch;
+  }
+
+  return null;
+}
 
 export interface PricingEngineInput {
   items: Array<{
@@ -22,6 +49,8 @@ export interface PricingEngineInput {
   delivery_type: DeliveryType;
   delivery_zone_id?: string;
   availableZones: DeliveryZone[];
+  zip_code?: string;
+  availableCepRules?: DeliveryCepRule[];
   coupon_code?: string;
   availableCoupons: Coupon[];
 }
@@ -158,8 +187,21 @@ export function calculateOrderPricing(input: PricingEngineInput): {
 
   // Delivery fee calculation
   let deliveryFee = 0;
+  let isCepAllowed: boolean | undefined = undefined;
+  let matchedCepRule: DeliveryCepRule | undefined = undefined;
+
   if (delivery_type === 'DELIVERY') {
-    if (delivery_zone_id) {
+    if (input.zip_code) {
+      const match = matchDeliveryCep(input.zip_code, input.availableCepRules || []);
+      if (match) {
+        deliveryFee = match.fee;
+        isCepAllowed = true;
+        matchedCepRule = match;
+      } else {
+        isCepAllowed = false;
+        deliveryFee = 0;
+      }
+    } else if (delivery_zone_id) {
       const zone = availableZones.find((z) => z.id === delivery_zone_id && z.active);
       deliveryFee = zone ? zone.fee : 10.0;
     } else {
@@ -221,6 +263,9 @@ export function calculateOrderPricing(input: PricingEngineInput): {
       coupon_id: appliedCouponId,
       delivery_type,
       delivery_fee: Math.round(deliveryFee * 100) / 100,
+      zip_code: input.zip_code,
+      is_cep_allowed: isCepAllowed,
+      cep_rule_matched: matchedCepRule,
       total: Math.round(total * 100) / 100,
       items_count: totalItemsCount,
     },
@@ -233,10 +278,12 @@ export const pricingEngine = {
     items: CartItem[];
     deliveryType: DeliveryType;
     deliveryZone?: DeliveryZone;
+    zipCode?: string;
+    deliveryCepRules?: DeliveryCepRule[];
     coupon?: Coupon;
     storeSettings?: StoreSettings;
   }): PricingBreakdown => {
-    const { items, deliveryType, deliveryZone, coupon, storeSettings } = params;
+    const { items, deliveryType, deliveryZone, zipCode, deliveryCepRules, coupon, storeSettings } = params;
 
     let subtotal = 0;
     let itemsCount = 0;
@@ -248,10 +295,32 @@ export const pricingEngine = {
 
     // Delivery fee
     let deliveryFee = 0;
+    let isCepAllowed: boolean | undefined = undefined;
+    let matchedCepRule: DeliveryCepRule | undefined = undefined;
+
     if (deliveryType === 'DELIVERY') {
-      deliveryFee = deliveryZone ? deliveryZone.fee : 10.0;
-      // Free shipping threshold check if defined
-      if (storeSettings?.free_shipping_threshold && subtotal >= storeSettings.free_shipping_threshold) {
+      if (zipCode && zipCode.trim().length > 0) {
+        const match = matchDeliveryCep(zipCode, deliveryCepRules || []);
+        if (match) {
+          deliveryFee = match.fee;
+          isCepAllowed = true;
+          matchedCepRule = match;
+        } else {
+          isCepAllowed = false;
+          deliveryFee = 0;
+        }
+      } else if (deliveryZone) {
+        deliveryFee = deliveryZone.fee;
+      } else {
+        deliveryFee = 10.0;
+      }
+
+      // Free shipping threshold check if defined (only if cep is allowed or zone exists)
+      if (
+        isCepAllowed !== false &&
+        storeSettings?.free_shipping_threshold &&
+        subtotal >= storeSettings.free_shipping_threshold
+      ) {
         deliveryFee = 0;
       }
     } else {
@@ -301,6 +370,9 @@ export const pricingEngine = {
       coupon_id: couponId,
       delivery_type: deliveryType,
       delivery_fee: Math.round(deliveryFee * 100) / 100,
+      zip_code: zipCode,
+      is_cep_allowed: isCepAllowed,
+      cep_rule_matched: matchedCepRule,
       total: Math.round(total * 100) / 100,
       items_count: itemsCount,
     };

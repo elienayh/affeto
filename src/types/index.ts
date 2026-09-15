@@ -50,6 +50,13 @@ export interface ProductOption {
   values: ProductOptionValue[];
 }
 
+export interface ProductScheduleConfig {
+  is_scheduled_only: boolean;
+  available_days: number[]; // 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb
+  batch_limit: number; // Capacidade por fornada (ex: 10 unidades)
+  days_label?: string; // Ex: 'Terças e Sextas'
+}
+
 export interface Product {
   id: string;
   category_id: string;
@@ -67,6 +74,7 @@ export interface Product {
   tags?: string[];
   image_url: string;
   options?: ProductOption[];
+  schedule_config?: ProductScheduleConfig;
   created_at: string;
   updated_at: string;
 }
@@ -127,6 +135,15 @@ export interface DeliveryZone {
   active: boolean;
 }
 
+export interface DeliveryCepRule {
+  id: string;
+  cep: string; // Ex: '01419-002' ou '01419' (5 dígitos)
+  label?: string; // Ex: 'Jardins / Cerqueira César'
+  fee: number; // Preço exclusivo para este CEP
+  estimated_minutes?: number;
+  active: boolean;
+}
+
 export interface PricingBreakdown {
   subtotal: number;
   discount: number;
@@ -134,6 +151,9 @@ export interface PricingBreakdown {
   coupon_id?: string;
   delivery_type: DeliveryType;
   delivery_fee: number;
+  zip_code?: string;
+  is_cep_allowed?: boolean;
+  cep_rule_matched?: DeliveryCepRule;
   total: number;
   items_count: number;
 }
@@ -195,6 +215,7 @@ export interface Order {
   total: number;
   coupon_code?: string;
   notes?: string;
+  payment_method?: PaymentMethod;
   payment?: PaymentRecord;
   status_history: OrderStatusHistoryItem[];
   created_at: string;
@@ -206,6 +227,10 @@ export interface StoreSettings {
   name: string;
   slug: string;
   address: string;
+  city?: string;
+  state?: string;
+  pickup_address?: string;
+  logo_url?: string;
   phone: string;
   whatsapp: string;
   pix_key: string;

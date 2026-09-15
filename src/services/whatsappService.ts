@@ -1,19 +1,20 @@
+import { generateWhatsAppOrderSummary, getWhatsAppOrderUrl, BAKERY_WHATSAPP_NUMBER } from '../lib/whatsappSummary';
 import { Order } from '../types';
 
 /**
- * Service: Notificações e Atendimento WhatsApp (Pós-MVP - Seção 4)
+ * Service: Notificações e Atendimento WhatsApp (Padaria Affeto +5532984680513)
  */
 export const whatsappService = {
   sendOrderConfirmation: async (order: Order): Promise<boolean> => {
-    console.info(`[WhatsAppService Stub] sendOrderConfirmation for order ${order.code} - Pós-MVP`);
+    console.info(`[WhatsAppService] Order ${order.code} registered for WhatsApp dispatch`);
     return true;
   },
 
-  buildWhatsAppOrderLink: (order: Order, phone: string): string => {
-    const text = encodeURIComponent(
-      `Olá, Affeto Pães! Gostaria de consultar o status do meu pedido ${order.code}.`
-    );
-    const cleanPhone = phone.replace(/\D/g, '');
-    return `https://wa.me/${cleanPhone}?text=${text}`;
+  buildWhatsAppOrderLink: (order: Order, phone: string = BAKERY_WHATSAPP_NUMBER): string => {
+    return getWhatsAppOrderUrl(order, phone);
+  },
+
+  buildWhatsAppSummaryText: (order: Order): string => {
+    return generateWhatsAppOrderSummary(order);
   },
 };

@@ -1,4 +1,71 @@
-import { Category, Coupon, DeliveryZone, Order, Product, StoreSettings } from '../types';
+import { Category, Coupon, DeliveryCepRule, DeliveryZone, Order, Product, StoreSettings } from '../types';
+
+export const INITIAL_DELIVERY_CEPS: DeliveryCepRule[] = [
+  {
+    id: 'cep-1',
+    cep: '01419-002',
+    label: 'Cerqueira César / Jardins',
+    fee: 9.0,
+    estimated_minutes: 30,
+    active: true,
+  },
+  {
+    id: 'cep-2',
+    cep: '01426-001',
+    label: 'Jardins / Oscar Freire',
+    fee: 10.0,
+    estimated_minutes: 35,
+    active: true,
+  },
+  {
+    id: 'cep-3',
+    cep: '05414-012',
+    label: 'Pinheiros / Fradique Coutinho',
+    fee: 8.5,
+    estimated_minutes: 30,
+    active: true,
+  },
+  {
+    id: 'cep-4',
+    cep: '05435-000',
+    label: 'Vila Madalena / Rua Harmonia',
+    fee: 7.0,
+    estimated_minutes: 25,
+    active: true,
+  },
+  {
+    id: 'cep-5',
+    cep: '04538-133',
+    label: 'Itaim Bibi / Faria Lima',
+    fee: 13.0,
+    estimated_minutes: 40,
+    active: true,
+  },
+  {
+    id: 'cep-6',
+    cep: '04515-030',
+    label: 'Moema Pássaros',
+    fee: 14.5,
+    estimated_minutes: 45,
+    active: true,
+  },
+  {
+    id: 'cep-7',
+    cep: '01227-000',
+    label: 'Higienópolis / Santa Cecília',
+    fee: 12.0,
+    estimated_minutes: 40,
+    active: true,
+  },
+  {
+    id: 'cep-8',
+    cep: '05014-000',
+    label: 'Perdizes / PUC-SP',
+    fee: 11.5,
+    estimated_minutes: 35,
+    active: true,
+  },
+];
 
 export const INITIAL_CATEGORIES: Category[] = [
   {
@@ -58,6 +125,31 @@ export const INITIAL_CATEGORIES: Category[] = [
 ];
 
 export const INITIAL_PRODUCTS: Product[] = [
+  {
+    id: 'prod-pao-nutella-especial',
+    category_id: 'cat-paes',
+    name: 'Pão Artesanal com Nutella & Avelãs Tostadas',
+    slug: 'pao-artesanal-nutella-avela',
+    description: 'Massa brioche de fermentação lenta recheada generosamente com Nutella pura e avelãs inteiras crocantes tostadas no forno a lenha.',
+    base_price: 36.0,
+    promotional_price: 32.0,
+    unit: 'unidade (approx. 550g)',
+    is_active: true,
+    is_featured: true,
+    stock_quantity: 10,
+    track_stock: true,
+    allergens: ['Contém Glúten', 'Contém Leite', 'Contém Avelãs'],
+    tags: ['Fornada Exclusiva', 'Nutella Pura', 'Lote Limitado'],
+    image_url: 'https://images.unsplash.com/photo-1549931319-a545dcf3bc73?auto=format&fit=crop&w=800&q=80',
+    schedule_config: {
+      is_scheduled_only: true,
+      available_days: [2, 5], // Terça-feira (2) e Sexta-feira (5)
+      batch_limit: 10, // 10 unidades por fornada
+      days_label: 'Fornadas às Terças e Sextas (Lote de 10 unidades)',
+    },
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
   {
     id: 'prod-sourdough-tradicional',
     category_id: 'cat-paes',
@@ -350,9 +442,13 @@ export const INITIAL_STORE_SETTINGS: StoreSettings = {
   id: 'store-affeto-matriz',
   name: 'Affeto Pães Artesanais',
   slug: 'affeto-paes',
-  address: 'Rua Harmonia, 412 - Vila Madalena, São Paulo - SP',
-  phone: '(11) 98765-4321',
-  whatsapp: '5511987654321',
+  address: 'Espera Feliz - MG',
+  city: 'Espera Feliz',
+  state: 'MG',
+  pickup_address: 'Rua Principal, 100 - Centro, Espera Feliz - MG',
+  logo_url: '',
+  phone: '(32) 98468-0513',
+  whatsapp: '5532984680513',
   pix_key: 'contato@affetopaes.com.br',
   is_open: true,
   min_order_value: 20.0,
@@ -459,9 +555,9 @@ export const SAMPLE_ORDERS: Order[] = [
   {
     id: 'ord-102',
     code: '#AFF-2026-0002',
-    customer_name: 'Rodrigo Mendes',
-    customer_email: 'rodrigo.mendes@exemplo.com',
-    customer_phone: '(11) 98111-3344',
+    customer_name: 'Tamiris Toledo',
+    customer_email: 'toledodias87@gmail.com',
+    customer_phone: '(32) 98468-0513',
     status: 'READY',
     payment_status: 'APPROVED',
     delivery_type: 'PICKUP',

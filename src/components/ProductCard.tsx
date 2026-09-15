@@ -1,9 +1,11 @@
 import React from 'react';
-import { Heart, Plus, Check, AlertCircle, Sparkles } from 'lucide-react';
-import { Product } from '../types';
+import { Heart, Plus, Check, AlertCircle, Sparkles, Calendar, Clock } from 'lucide-react';
+import { getNextAvailableBatch } from '../lib/batchScheduler';
+import { Order, Product } from '../types';
 
 interface ProductCardProps {
   product: Product;
+  orders?: Order[];
   isFavorite: boolean;
   onToggleFavorite: (id: string) => void;
   onSelectProduct: (product: Product) => void;
@@ -13,6 +15,7 @@ interface ProductCardProps {
 
 export const ProductCard: React.FC<ProductCardProps> = ({
   product,
+  orders = [],
   isFavorite,
   onToggleFavorite,
   onSelectProduct,
@@ -23,6 +26,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   const currentPrice = hasPromo ? product.promotional_price! : product.base_price;
   const hasOptions = product.options && product.options.length > 0;
   const isOutOfStock = product.track_stock && product.stock_quantity <= 0;
+
+  // Next available batch for schedule-restricted products
+  const nextBatch = product.schedule_config?.is_scheduled_only
+    ? getNextAvailableBatch(product, orders)
+    : null;
 
   return (
     <div
@@ -114,6 +122,26 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           <p className="text-xs text-[#7E6C58] mt-1.5 line-clamp-2 leading-relaxed">
             {product.description}
           </p>
+
+          {/* Special Batch / Scheduled Product Notice */}
+          {product.schedule_config?.is_scheduled_only && (
+            <div className="mt-2.5 p-2 rounded-xl bg-[#FAF5EB] border border-[#B7A05E]/30 text-[11px] space-y-1">
+              <div className="flex items-center gap-1.5 font-bold text-[#B8623F]">
+                <Calendar className="w-3.5 h-3.5 shrink-0" />
+                <span>{product.schedule_config.days_label || 'Fornadas em dias selecionados'}</span>
+              </div>
+              {nextBatch ? (
+                <div className="text-[#554432] flex items-center justify-between">
+                  <span>Próxima saída: <strong>{nextBatch.shortDate}</strong></span>
+                  <span className="font-semibold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                    {nextBatch.remainingSlots} de {nextBatch.capacity} vagas
+                  </span>
+                </div>
+              ) : (
+                <p className="text-amber-800 text-[10px]">Aguardando abertura de novo lote.</p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Price & Action Row */}

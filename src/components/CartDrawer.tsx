@@ -11,8 +11,11 @@ import {
   Store,
   CheckCircle2,
   AlertCircle,
+  MapPin,
+  HelpCircle,
 } from 'lucide-react';
-import { CartItem, Coupon, DeliveryType, DeliveryZone, PricingBreakdown } from '../types';
+import { matchDeliveryCep } from '../lib/pricingEngine';
+import { CartItem, Coupon, DeliveryCepRule, DeliveryType, DeliveryZone, PricingBreakdown } from '../types';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -26,6 +29,9 @@ interface CartDrawerProps {
   deliveryZones: DeliveryZone[];
   selectedZoneId: string;
   onChangeZoneId: (zoneId: string) => void;
+  deliveryCepRules: DeliveryCepRule[];
+  inputCep: string;
+  onChangeCep: (cep: string) => void;
   couponCodeInput: string;
   onChangeCouponCode: (code: string) => void;
   onApplyCoupon: (code: string) => void;
@@ -45,13 +51,21 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   deliveryZones,
   selectedZoneId,
   onChangeZoneId,
+  deliveryCepRules,
+  inputCep,
+  onChangeCep,
   couponCodeInput,
   onChangeCouponCode,
   onApplyCoupon,
   couponMessage,
   onProceedToCheckout,
 }) => {
+  const [showCepListModal, setShowCepListModal] = useState(false);
   if (!isOpen) return null;
+
+  const matchedCep = inputCep ? matchDeliveryCep(inputCep, deliveryCepRules) : null;
+  const isCepValid = !!matchedCep;
+  const isDeliveryBlockedByCep = deliveryType === 'DELIVERY' && inputCep.trim().length >= 5 && !isCepValid;
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-black/50 backdrop-blur-xs flex justify-end">
@@ -198,23 +212,96 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 </button>
               </div>
 
-              {/* Delivery Zone selection if delivery */}
+              {/* Delivery Zone / CEP selection if delivery */}
               {deliveryType === 'DELIVERY' && (
-                <div className="space-y-1">
-                  <label className="block text-[11px] font-bold text-[#3A2E1F]">
-                    Região de Entrega (Taxa Calculada)
-                  </label>
-                  <select
-                    value={selectedZoneId}
-                    onChange={(e) => onChangeZoneId(e.target.value)}
-                    className="w-full text-xs p-2 rounded-xl border border-[#3A2E1F]/20 bg-white text-[#3A2E1F] focus:outline-none focus:ring-1 focus:ring-[#B8623F]"
-                  >
-                    {deliveryZones.map((z) => (
-                      <option key={z.id} value={z.id}>
-                        {z.name} — R$ {z.fee.toFixed(2).replace('.', ',')} ({z.estimated_minutes} min)
-                      </option>
-                    ))}
-                  </select>
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[11px] font-bold text-[#3A2E1F] flex items-center gap-1">
+                      <MapPin className="w-3.5 h-3.5 text-[#B8623F]" />
+                      <span>Informe seu CEP (Entrega Local Própria)</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowCepListModal(true)}
+                      className="text-[10px] text-[#B8623F] hover:underline font-semibold flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <HelpCircle className="w-3 h-3" />
+                      <span>Ver CEPs Atendidos</span>
+                    </button>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <input
+                      id="input-cep-carrinho"
+                      type="text"
+                      placeholder="00000-000"
+                      maxLength={9}
+                      value={inputCep}
+                      onChange={(e) => {
+                        let val = e.target.value.replace(/\D/g, '');
+                        if (val.length > 5) {
+                          val = `${val.slice(0, 5)}-${val.slice(5, 8)}`;
+                        }
+                        onChangeCep(val);
+                      }}
+                      className="flex-1 text-xs p-2 rounded-xl border border-[#3A2E1F]/20 bg-white text-[#3A2E1F] focus:outline-none focus:ring-1 focus:ring-[#B8623F] font-mono font-medium"
+                    />
+                    {deliveryCepRules.length > 0 && (
+                      <select
+                        value={inputCep ? matchedCep?.id || '' : ''}
+                        onChange={(e) => {
+                          const rule = deliveryCepRules.find((r) => r.id === e.target.value);
+                          if (rule) onChangeCep(rule.cep);
+                        }}
+                        className="text-[11px] p-2 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0] text-[#554432] max-w-[150px]"
+                      >
+                        <option value="">Ou selecione o bairro...</option>
+                        {deliveryCepRules
+                          .filter((r) => r.active)
+                          .map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.label || r.cep} (R$ {r.fee.toFixed(2)})
+                            </option>
+                          ))}
+                      </select>
+                    )}
+                  </div>
+
+                  {/* Feedback de Validação do CEP */}
+                  {inputCep.replace(/\D/g, '').length >= 5 && (
+                    <>
+                      {matchedCep ? (
+                        <div className="p-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] flex items-center justify-between">
+                          <span className="flex items-center gap-1.5 font-medium">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>{matchedCep.label || 'Região Atendida'}: Frete R$ {matchedCep.fee.toFixed(2).replace('.', ',')}</span>
+                          </span>
+                          {matchedCep.estimated_minutes && (
+                            <span className="text-[10px] text-emerald-700 bg-emerald-100/60 px-1.5 py-0.5 rounded">
+                              ~{matchedCep.estimated_minutes} min
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-[11px] space-y-1">
+                          <div className="flex items-center gap-1.5 font-bold">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            <span>CEP fora da rota de perecíveis</span>
+                          </div>
+                          <p className="text-[10px] text-red-600 leading-tight">
+                            Por serem pães artesanais frescos, não enviamos pelo correio. Entregamos apenas nos CEPs com rota local. Você pode escolher <strong>Retirada no Balcão</strong>!
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => onChangeDeliveryType('PICKUP')}
+                            className="mt-1 inline-block text-[10px] font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 px-2 py-1 rounded-md transition-colors cursor-pointer"
+                          >
+                            Alterar para Retirada no Balcão (Grátis)
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
 
@@ -296,16 +383,95 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
               <button
                 id="btn-avancar-checkout"
+                disabled={isDeliveryBlockedByCep || (deliveryType === 'DELIVERY' && !inputCep.trim())}
                 onClick={onProceedToCheckout}
-                className="w-full py-3.5 bg-[#B8623F] hover:bg-[#994E30] text-white font-semibold text-sm rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 cursor-pointer"
+                className={`w-full py-3.5 font-semibold text-sm rounded-xl transition-all shadow-md flex items-center justify-center gap-2 ${
+                  isDeliveryBlockedByCep || (deliveryType === 'DELIVERY' && !inputCep.trim())
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-[#B8623F] hover:bg-[#994E30] text-white hover:shadow-lg cursor-pointer'
+                }`}
               >
-                <span>Avançar para Agendamento</span>
+                <span>
+                  {deliveryType === 'DELIVERY' && !inputCep.trim()
+                    ? 'Informe seu CEP para Continuar'
+                    : isDeliveryBlockedByCep
+                    ? 'Selecione Retirada ou CEP Válido'
+                    : 'Avançar para Agendamento'}
+                </span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           </>
         )}
       </div>
+
+      {/* Modal de Consulta de CEPs Atendidos */}
+      {showCepListModal && (
+        <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div>
+                <h3 className="font-serif font-bold text-lg text-[#3A2E1F]">
+                  CEPs e Regiões de Entrega
+                </h3>
+                <p className="text-xs text-[#7E6C58]">
+                  Entregas locais especializadas para produtos frescos e perecíveis.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowCepListModal(false)}
+                className="p-1 rounded-full hover:bg-gray-100 text-gray-500"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
+              {deliveryCepRules.map((rule) => (
+                <div
+                  key={rule.id}
+                  onClick={() => {
+                    onChangeCep(rule.cep);
+                    setShowCepListModal(false);
+                  }}
+                  className="p-2.5 rounded-xl border border-gray-100 hover:border-[#B8623F] hover:bg-[#FAF7F0] transition-colors cursor-pointer flex items-center justify-between"
+                >
+                  <div>
+                    <span className="font-mono font-bold text-xs text-[#B8623F]">
+                      {rule.cep}
+                    </span>
+                    <span className="block text-xs font-medium text-[#3A2E1F]">
+                      {rule.label || 'Região'}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-bold text-xs text-[#3A2E1F]">
+                      R$ {rule.fee.toFixed(2).replace('.', ',')}
+                    </span>
+                    {rule.estimated_minutes && (
+                      <span className="block text-[10px] text-gray-500">
+                        ~{rule.estimated_minutes} min
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-2 border-t text-center">
+              <p className="text-[11px] text-gray-500 mb-3">
+                Mora fora desta rota? Escolha a <strong>Retirada no Balcão</strong> na nossa loja física!
+              </p>
+              <button
+                onClick={() => setShowCepListModal(false)}
+                className="w-full py-2 bg-[#3A2E1F] text-white text-xs font-semibold rounded-xl"
+              >
+                Entendi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -24,7 +24,7 @@ interface OrderTrackingModalProps {
 export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
   order,
   onClose,
-  storePhone = '5511987654321',
+  storePhone = '5532984680513',
 }) => {
   if (!order) return null;
 
@@ -224,10 +224,10 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
               href={whatsAppLink}
               target="_blank"
               rel="noreferrer"
-              className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs"
+              className="flex-1 py-2.5 px-4 bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs"
             >
-              <MessageCircle className="w-4 h-4" />
-              <span>Falar no WhatsApp da Padaria</span>
+              <MessageCircle className="w-4 h-4 fill-current" />
+              <span>Continuar no WhatsApp</span>
             </a>
 
             <button

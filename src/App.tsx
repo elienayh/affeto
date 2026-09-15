@@ -26,6 +26,7 @@ import {
   CartItemOptionSelection,
   Category,
   Coupon,
+  DeliveryCepRule,
   DeliveryType,
   DeliveryZone,
   Order,
@@ -35,8 +36,9 @@ import {
   StoreSettings,
 } from './types';
 import { Header } from './components/Header';
-import { HeroBanner } from './components/HeroBanner';
-import { CategoryFilter } from './components/CategoryFilter';
+import { CategoryScrollNav } from './components/CategoryScrollNav';
+import { FeaturedItemBanner } from './components/FeaturedItemBanner';
+import { FloatingCartButton } from './components/FloatingCartButton';
 import { ProductCard } from './components/ProductCard';
 import { ProductModal } from './components/ProductModal';
 import { CartDrawer } from './components/CartDrawer';
@@ -56,6 +58,10 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>('all');
   const [loadingCatalog, setLoadingCatalog] = useState(true);
+
+  // Delivery CEPs configuration
+  const [deliveryCepRules, setDeliveryCepRules] = useState<DeliveryCepRule[]>([]);
+  const [customerCep, setCustomerCep] = useState<string>('');
 
   // Store & delivery settings
   const [storeSettings, setStoreSettings] = useState<StoreSettings>({
@@ -106,6 +112,25 @@ export default function App() {
   const [isFavoritesOpen, setIsFavoritesOpen] = useState(false);
   const [isScheduleInfoOpen, setIsScheduleInfoOpen] = useState(false);
 
+  // Listener for direct /admin and #admin routing requested by user
+  useEffect(() => {
+    const handleUrlRoute = () => {
+      const path = window.location.pathname.toLowerCase();
+      const hash = window.location.hash.toLowerCase();
+      if (path === '/admin' || path.startsWith('/admin/') || hash === '#admin') {
+        setIsAdminOpen(true);
+      }
+    };
+
+    handleUrlRoute();
+    window.addEventListener('popstate', handleUrlRoute);
+    window.addEventListener('hashchange', handleUrlRoute);
+    return () => {
+      window.removeEventListener('popstate', handleUrlRoute);
+      window.removeEventListener('hashchange', handleUrlRoute);
+    };
+  }, []);
+
   // Active Order & Payment Flow
   const [activePaymentOrder, setActivePaymentOrder] = useState<{
     order: Order;
@@ -130,13 +155,14 @@ export default function App() {
   const loadInitialData = async () => {
     setLoadingCatalog(true);
     try {
-      const [prods, cats, zones, cps, sets, ords] = await Promise.all([
+      const [prods, cats, zones, cps, sets, ords, cepRules] = await Promise.all([
         catalogService.getProducts(),
         catalogService.getCategories(),
         dataStore.getDeliveryZones(),
         dataStore.getCoupons(),
         dataStore.getStoreSettings(),
         dataStore.getOrders(),
+        dataStore.getDeliveryCeps(),
       ]);
 
       setProducts(prods);
@@ -146,6 +172,7 @@ export default function App() {
       setCoupons(cps);
       setStoreSettings(sets);
       setAllOrders(ords);
+      setDeliveryCepRules(cepRules);
 
       // Check URL for order tracking param
       const urlParams = new URLSearchParams(window.location.search);
@@ -186,8 +213,19 @@ export default function App() {
       deliveryZone: zone,
       coupon: appliedCoupon,
       storeSettings,
+      zipCode: customerCep,
+      deliveryCepRules,
     });
-  }, [cartItems, deliveryType, selectedZoneId, deliveryZones, appliedCoupon, storeSettings]);
+  }, [
+    cartItems,
+    deliveryType,
+    selectedZoneId,
+    deliveryZones,
+    appliedCoupon,
+    storeSettings,
+    customerCep,
+    deliveryCepRules,
+  ]);
 
   // Favorites Handlers
   const handleToggleFavorite = (productId: string) => {
@@ -349,6 +387,33 @@ export default function App() {
     return products.filter((p) => favoriteIds.includes(p.id));
   }, [products, favoriteIds]);
 
+  // If Admin view is active, render full-page AdminPanel directly
+  if (isAdminOpen) {
+    return (
+      <AdminPanel
+        isOpen={true}
+        onClose={() => {
+          setIsAdminOpen(false);
+          if (
+            window.location.pathname.toLowerCase() === '/admin' ||
+            window.location.pathname.toLowerCase().startsWith('/admin/') ||
+            window.location.hash.toLowerCase() === '#admin'
+          ) {
+            window.history.pushState(null, '', '/');
+          }
+        }}
+        orders={allOrders}
+        onOrderUpdated={() => {
+          dataStore.getOrders().then(setAllOrders);
+          dataStore.getDeliveryCeps().then(setDeliveryCepRules);
+          catalogService.getProducts().then(setProducts);
+          catalogService.getCategories().then(setCategories);
+          dataStore.getStoreSettings().then(setStoreSettings);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#FAF7F0] text-[#3A2E1F] flex flex-col selection:bg-[#B8623F] selection:text-white">
       {/* Toast Notification */}
@@ -369,6 +434,7 @@ export default function App() {
         onOpenAdmin={() => setIsAdminOpen(true)}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        storeSettings={storeSettings}
       />
 
       {/* Main Body */}
@@ -378,6 +444,7 @@ export default function App() {
           <PaymentScreen
             order={activePaymentOrder.order}
             paymentMethod={activePaymentOrder.method}
+            storeSettings={storeSettings}
             onPaymentApproved={(upd) => {
               setActivePaymentOrder({ ...activePaymentOrder, order: upd });
               handlePaymentApproved(upd);
@@ -390,108 +457,131 @@ export default function App() {
           />
         ) : (
           <>
-            {/* Hero Banner with Fornada status & Scheduling CTA */}
-            <HeroBanner
-              onOpenScheduleInfo={() => setIsScheduleInfoOpen(true)}
-              onExploreMenu={() => {
-                const el = document.getElementById('cardapio-secao');
-                el?.scrollIntoView({ behavior: 'smooth' });
-              }}
+            {/* 1. Categorias Cadastradas com Navegação por Rolagem Suave */}
+            <CategoryScrollNav
+              categories={categories}
+              activeCategoryId={selectedCategoryId}
+              onSelectCategory={setSelectedCategoryId}
+              productsCounts={categories.reduce((acc, cat) => {
+                acc[cat.id] = products.filter((p) => p.category_id === cat.id && p.is_active).length;
+                return acc;
+              }, {} as Record<string, number>)}
             />
 
-            {/* Catalog Section */}
-            <section id="cardapio-secao" className="space-y-6 pt-2">
-              {/* Category Filter Carousel */}
-              <CategoryFilter
-                categories={categories}
-                selectedCategoryId={selectedCategoryId}
-                onSelectCategory={setSelectedCategoryId}
-              />
+            {/* 2. Item em Destaque da Padaria */}
+            {(() => {
+              const featured =
+                products.find((p) => p.id === 'prod-pao-nutella-especial') ||
+                products.find((p) => p.tags?.includes('Destaque') || p.tags?.includes('Especial')) ||
+                products[0];
 
-              {/* Secondary Tag Pills & Search Bar (mobile / auxiliary) */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-2 border-b border-[#3A2E1F]/10">
-                {/* Tag Pills */}
-                <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
-                  <button
-                    onClick={() => setSelectedTag('all')}
-                    className={`text-xs px-3 py-1.5 rounded-full transition-all whitespace-nowrap cursor-pointer ${
-                      selectedTag === 'all'
-                        ? 'bg-[#3A2E1F] text-white font-semibold'
-                        : 'bg-white border border-[#3A2E1F]/15 text-[#7E6C58] hover:text-[#3A2E1F]'
-                    }`}
-                  >
-                    Todos os Pães
-                  </button>
-                  {allTags.map((tag) => (
-                    <button
-                      key={tag}
-                      onClick={() => setSelectedTag(tag)}
-                      className={`text-xs px-3 py-1.5 rounded-full transition-all whitespace-nowrap cursor-pointer ${
-                        selectedTag === tag
-                          ? 'bg-[#B8623F] text-white font-semibold'
-                          : 'bg-white border border-[#3A2E1F]/15 text-[#7E6C58] hover:text-[#3A2E1F]'
-                      }`}
-                    >
-                      {tag}
-                    </button>
-                  ))}
-                </div>
+              if (!featured) return null;
 
-                <div className="text-xs text-[#7E6C58] font-medium shrink-0">
-                  Exibindo {filteredProducts.length}{' '}
-                  {filteredProducts.length === 1 ? 'produto artesanal' : 'produtos artesanais'}
-                </div>
-              </div>
+              return (
+                <FeaturedItemBanner
+                  product={featured}
+                  orders={allOrders}
+                  onSelectProduct={setSelectedProduct}
+                  onQuickAdd={handleQuickAdd}
+                  isInCart={cartItems.some((it) => it.product.id === featured.id)}
+                />
+              );
+            })()}
 
-              {/* Product Grid */}
+            {/* 3. Demais Itens em Sequência por Categoria */}
+            <div id="cardapio-itens-sequencia" className="space-y-12 pt-2">
               {loadingCatalog ? (
                 <div className="py-20 text-center space-y-3">
                   <div className="w-10 h-10 border-3 border-[#B8623F] border-t-transparent rounded-full animate-spin mx-auto" />
                   <p className="text-xs font-serif text-[#7E6C58]">
-                    Aquecendo o forno e carregando os pães...
+                    Aquecendo o forno e carregando os pães frescos...
                   </p>
                 </div>
-              ) : filteredProducts.length === 0 ? (
-                <div className="py-16 text-center bg-white rounded-3xl border border-[#3A2E1F]/10 p-8 space-y-3">
-                  <Wheat className="w-12 h-12 mx-auto text-[#B7A05E] opacity-60" />
-                  <h3 className="font-serif font-bold text-lg text-[#3A2E1F]">
-                    Nenhum pão encontrado
-                  </h3>
-                  <p className="text-xs text-[#7E6C58] max-w-sm mx-auto">
-                    Não encontramos nenhum item com o filtro selecionado. Experimente buscar por outro nome ou limpar os filtros.
-                  </p>
-                  <button
-                    onClick={() => {
-                      setSearchQuery('');
-                      setSelectedCategoryId('all');
-                      setSelectedTag('all');
-                    }}
-                    className="px-4 py-2 bg-[#B8623F] text-white rounded-xl text-xs font-semibold"
-                  >
-                    Limpar Filtros
-                  </button>
-                </div>
+              ) : searchQuery.trim() ? (
+                /* Exibição de busca quando usuário digita no campo de busca */
+                <section className="space-y-4">
+                  <div className="flex items-center justify-between border-b border-[#3A2E1F]/10 pb-2">
+                    <h3 className="font-serif font-bold text-lg text-[#3A2E1F]">
+                      Resultados para "{searchQuery}"
+                    </h3>
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="text-xs text-[#B8623F] hover:underline"
+                    >
+                      Limpar busca
+                    </button>
+                  </div>
+                  {filteredProducts.length === 0 ? (
+                    <div className="py-12 text-center bg-white rounded-2xl border border-[#3A2E1F]/10 p-6 text-xs text-[#7E6C58]">
+                      Nenhum produto encontrado com o termo digitado.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-6">
+                      {filteredProducts.map((product) => (
+                        <ProductCard
+                          key={product.id}
+                          product={product}
+                          orders={allOrders}
+                          isFavorite={favoriteIds.includes(product.id)}
+                          onToggleFavorite={handleToggleFavorite}
+                          onSelectProduct={setSelectedProduct}
+                          onQuickAdd={handleQuickAdd}
+                          isInCart={cartItems.some((it) => it.product.id === product.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-6">
-                  {filteredProducts.map((product) => {
-                    const isFav = favoriteIds.includes(product.id);
-                    const inCart = cartItems.some((it) => it.product.id === product.id);
+                /* Sequência direta por categoria com âncoras para rolagem */
+                categories
+                  .filter((cat) => cat.active)
+                  .sort((a, b) => a.sort_order - b.sort_order)
+                  .map((cat) => {
+                    const catProducts = products.filter(
+                      (p) => p.category_id === cat.id && p.is_active
+                    );
+                    if (catProducts.length === 0) return null;
 
                     return (
-                      <ProductCard
-                        key={product.id}
-                        product={product}
-                        isFavorite={isFav}
-                        onToggleFavorite={handleToggleFavorite}
-                        onSelectProduct={setSelectedProduct}
-                        onQuickAdd={handleQuickAdd}
-                        isInCart={inCart}
-                      />
+                      <section
+                        key={cat.id}
+                        id={`secao-categoria-${cat.id}`}
+                        className="space-y-4 scroll-mt-28"
+                      >
+                        {/* Header minimalista da Categoria */}
+                        <div className="flex items-center justify-between border-b border-[#3A2E1F]/15 pb-2.5">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-[#B8623F]" />
+                            <h3 className="font-serif font-bold text-xl sm:text-2xl text-[#3A2E1F] tracking-tight">
+                              {cat.name}
+                            </h3>
+                          </div>
+                          <span className="text-xs text-[#7E6C58] font-medium">
+                            {catProducts.length} {catProducts.length === 1 ? 'item' : 'itens'}
+                          </span>
+                        </div>
+
+                        {/* Grade de Produtos em Sequência */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-6">
+                          {catProducts.map((product) => (
+                            <ProductCard
+                              key={product.id}
+                              product={product}
+                              orders={allOrders}
+                              isFavorite={favoriteIds.includes(product.id)}
+                              onToggleFavorite={handleToggleFavorite}
+                              onSelectProduct={setSelectedProduct}
+                              onQuickAdd={handleQuickAdd}
+                              isInCart={cartItems.some((it) => it.product.id === product.id)}
+                            />
+                          ))}
+                        </div>
+                      </section>
                     );
-                  })}
-                </div>
+                  })
               )}
-            </section>
+            </div>
           </>
         )}
       </main>
@@ -549,7 +639,7 @@ export default function App() {
             {/* Column 4: Quick Links & Management */}
             <div className="space-y-3 text-xs">
               <h4 className="font-serif font-bold text-sm text-[#EADBBA]">
-                Gestão & Integrações
+                Atendimento & Rastreio
               </h4>
               <div className="space-y-2">
                 <button
@@ -559,16 +649,9 @@ export default function App() {
                 >
                   Rastrear Meu Pedido por Código
                 </button>
-                <button
-                  id="btn-footer-admin-panel"
-                  onClick={() => setIsAdminOpen(true)}
-                  className="block text-[#B7A05E] hover:text-white font-semibold transition-colors cursor-pointer"
-                >
-                  Painel Administrativo & Kanban
-                </button>
                 <div className="pt-1 text-[11px] text-[#7E6C58]">
-                  <span>Supabase: </span>
-                  <span className="font-mono text-emerald-400">Conectado (ropgdbgkjghwdxdglchz)</span>
+                  <span>Status da Fornada: </span>
+                  <span className="font-mono text-emerald-400">Atendimento ao Vivo</span>
                 </div>
               </div>
             </div>
@@ -581,7 +664,7 @@ export default function App() {
         </div>
       </footer>
 
-      {/* MODALS */}
+      {/* MODALS & OVERLAYS */}
 
       {/* 1. Product Customization & Details Modal */}
       <ProductModal
@@ -605,6 +688,9 @@ export default function App() {
         deliveryZones={deliveryZones}
         selectedZoneId={selectedZoneId}
         onChangeZoneId={setSelectedZoneId}
+        deliveryCepRules={deliveryCepRules}
+        inputCep={customerCep}
+        onChangeCep={setCustomerCep}
         couponCodeInput={couponCode}
         onChangeCouponCode={setCouponCode}
         onApplyCoupon={handleApplyCoupon}
@@ -615,7 +701,7 @@ export default function App() {
         }}
       />
 
-      {/* 3. Checkout Modal */}
+      {/* 3. Checkout Modal com Suporte a CEP e Fornadas Programadas */}
       <CheckoutModal
         isOpen={isCheckoutOpen}
         onClose={() => setIsCheckoutOpen(false)}
@@ -623,6 +709,9 @@ export default function App() {
         pricing={pricing}
         deliveryType={deliveryType}
         selectedZoneId={selectedZoneId}
+        deliveryCepRules={deliveryCepRules}
+        initialCep={customerCep}
+        orders={allOrders}
         storeSettings={storeSettings}
         onOrderCreated={handleOrderCreated}
       />
@@ -641,17 +730,7 @@ export default function App() {
         onSelectOrder={(ord) => setTrackingOrder(ord)}
       />
 
-      {/* 6. Admin Panel Modal */}
-      <AdminPanel
-        isOpen={isAdminOpen}
-        onClose={() => setIsAdminOpen(false)}
-        orders={allOrders}
-        onOrderUpdated={() => {
-          dataStore.getOrders().then(setAllOrders);
-        }}
-      />
-
-      {/* 7. Favorites Modal */}
+      {/* 6. Favorites Modal */}
       <FavoritesModal
         isOpen={isFavoritesOpen}
         onClose={() => setIsFavoritesOpen(false)}
@@ -664,6 +743,16 @@ export default function App() {
       <ScheduleInfoModal
         isOpen={isScheduleInfoOpen}
         onClose={() => setIsScheduleInfoOpen(false)}
+      />
+
+      {/* 9. Floating Cart Button (Botão flutuante para finalizar o pedido a qualquer momento) */}
+      <FloatingCartButton
+        itemsCount={pricing.items_count}
+        totalAmount={pricing.total}
+        itemCount={pricing.items_count}
+        subtotal={pricing.total}
+        onClick={() => setIsCartOpen(true)}
+        onOpenCart={() => setIsCartOpen(true)}
       />
     </div>
   );

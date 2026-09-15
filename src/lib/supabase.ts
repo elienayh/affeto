@@ -2,12 +2,13 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import {
   INITIAL_CATEGORIES,
   INITIAL_COUPONS,
+  INITIAL_DELIVERY_CEPS,
   INITIAL_DELIVERY_ZONES,
   INITIAL_PRODUCTS,
   INITIAL_STORE_SETTINGS,
   SAMPLE_ORDERS,
 } from '../data/mockData';
-import { Category, Coupon, DeliveryZone, Order, Product, StoreSettings } from '../types';
+import { Category, Coupon, DeliveryCepRule, DeliveryZone, Order, Product, StoreSettings } from '../types';
 
 // Provided Supabase project URL
 export const SUPABASE_DEFAULT_URL = 'https://ropgdbgkjghwdxdglchz.supabase.co';
@@ -48,6 +49,7 @@ const STORAGE_KEYS = {
   PRODUCTS: 'affeto_products_v2',
   COUPONS: 'affeto_coupons_v2',
   DELIVERY_ZONES: 'affeto_zones_v2',
+  DELIVERY_CEPS: 'affeto_delivery_ceps_v2',
   ORDERS: 'affeto_orders_v2',
   STORE_SETTINGS: 'affeto_store_v2',
   FAVORITES: 'affeto_favorites_v2',
@@ -148,6 +150,29 @@ export const dataStore = {
 
   saveDeliveryZones: (zones: DeliveryZone[]) => {
     setStored(STORAGE_KEYS.DELIVERY_ZONES, zones);
+  },
+
+  getDeliveryCeps: async (): Promise<DeliveryCepRule[]> => {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.from('delivery_ceps').select('*');
+        if (!error && data && data.length > 0) {
+          return data as DeliveryCepRule[];
+        }
+      } catch {
+        // Fallback to local
+      }
+    }
+    return getStored<DeliveryCepRule[]>(STORAGE_KEYS.DELIVERY_CEPS, INITIAL_DELIVERY_CEPS);
+  },
+
+  saveDeliveryCeps: (ceps: DeliveryCepRule[]) => {
+    setStored(STORAGE_KEYS.DELIVERY_CEPS, ceps);
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      Promise.resolve(supabase.from('delivery_ceps').upsert(ceps)).catch(() => {});
+    }
   },
 
   getOrders: async (): Promise<Order[]> => {

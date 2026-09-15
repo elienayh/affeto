@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   LayoutDashboard,
@@ -21,13 +21,26 @@ import {
   ChevronRight,
   TrendingUp,
   AlertTriangle,
+  MapPin,
+  Calendar,
+  Upload,
+  Image as ImageIcon,
+  Lock,
+  LogOut,
+  KeyRound,
+  Eye,
+  EyeOff,
+  Layers,
+  ArrowLeft,
 } from 'lucide-react';
+import { adminAuth } from '../lib/adminAuth';
 import { SUPABASE_FULL_SCHEMA_SQL } from '../lib/schemaSql';
 import { dataStore } from '../lib/supabase';
 import { orderService } from '../services/orderService';
 import {
   Category,
   Coupon,
+  DeliveryCepRule,
   DeliveryZone,
   Order,
   OrderStatus,
@@ -48,10 +61,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   orders,
   onOrderUpdated,
 }) => {
-  if (!isOpen) return null;
+  // Authentication State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => adminAuth.isAuthenticated());
+  const [loginEmail, setLoginEmail] = useState('toledodias87@gmail.com');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
+  // Password Change Modal State
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
+  const [passwordChangeStatus, setPasswordChangeStatus] = useState<{
+    error?: string;
+    success?: string;
+  } | null>(null);
+
+  // Active Tab
   const [activeTab, setActiveTab] = useState<
-    'orders' | 'products' | 'coupons' | 'supabase' | 'settings'
+    'orders' | 'products' | 'categories' | 'coupons' | 'ceps' | 'settings' | 'supabase'
   >('orders');
 
   // Supabase test state
@@ -78,31 +107,221 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [categories, setCategories] = useState<Category[]>([]);
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [zones, setZones] = useState<DeliveryZone[]>([]);
+  const [ceps, setCeps] = useState<DeliveryCepRule[]>([]);
   const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
+
+  // New CEP form state
+  const [newCep, setNewCep] = useState({
+    cep: '',
+    label: '',
+    fee: 10,
+    estimated_minutes: 35,
+  });
 
   // Selected order for detailed modal
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
-  // Edit/create product modal
+  // Product Create/Edit Modal State
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [isNewProduct, setIsNewProduct] = useState(false);
+  const productImageInputRef = useRef<HTMLInputElement>(null);
 
-  // Load data
+  // Category Create/Edit Modal State
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [isNewCategory, setIsNewCategory] = useState(false);
+
+  // Logo file upload ref
+  const logoImageInputRef = useRef<HTMLInputElement>(null);
+
+  // Load Data
+  const reloadData = async () => {
+    const [p, c, cp, z, cepRules, s] = await Promise.all([
+      dataStore.getProducts(),
+      dataStore.getCategories(),
+      dataStore.getCoupons(),
+      dataStore.getDeliveryZones(),
+      dataStore.getDeliveryCeps(),
+      dataStore.getStoreSettings(),
+    ]);
+    setProducts(p);
+    setCategories(c);
+    setCoupons(cp);
+    setZones(z);
+    setCeps(cepRules);
+    setStoreSettings(s);
+  };
+
   useEffect(() => {
-    const load = async () => {
-      const p = await dataStore.getProducts();
-      const c = await dataStore.getCategories();
-      const cp = await dataStore.getCoupons();
-      const z = await dataStore.getDeliveryZones();
-      const s = await dataStore.getStoreSettings();
-      setProducts(p);
-      setCategories(c);
-      setCoupons(cp);
-      setZones(z);
-      setStoreSettings(s);
-    };
-    load();
+    if (isOpen) {
+      reloadData();
+      setIsAuthenticated(adminAuth.isAuthenticated());
+    }
   }, [isOpen, onOrderUpdated]);
 
+  if (!isOpen) return null;
+
+  // Handle Login
+  const handleLoginSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+    const result = adminAuth.login(loginEmail, loginPassword);
+    if (result.success) {
+      setIsAuthenticated(true);
+      setLoginPassword('');
+    } else {
+      setLoginError(result.error || 'Falha ao autenticar.');
+    }
+  };
+
+  // Handle Logout
+  const handleLogout = () => {
+    adminAuth.logout();
+    setIsAuthenticated(false);
+  };
+
+  // Handle Password Change
+  const handleChangePasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordChangeStatus(null);
+
+    if (newPasswordInput !== confirmPasswordInput) {
+      setPasswordChangeStatus({ error: 'A confirmação de senha não confere.' });
+      return;
+    }
+
+    const res = adminAuth.changePassword(currentPasswordInput, newPasswordInput);
+    if (res.success) {
+      setPasswordChangeStatus({ success: 'Senha alterada com sucesso!' });
+      setTimeout(() => {
+        setShowChangePasswordModal(false);
+        setCurrentPasswordInput('');
+        setNewPasswordInput('');
+        setConfirmPasswordInput('');
+        setPasswordChangeStatus(null);
+      }, 1500);
+    } else {
+      setPasswordChangeStatus({ error: res.error });
+    }
+  };
+
+  // Handle CEP management
+  const handleAddCep = () => {
+    if (!newCep.cep.trim() || !newCep.label.trim()) return;
+    const rule: DeliveryCepRule = {
+      id: `cep-${Date.now()}`,
+      cep: newCep.cep.trim(),
+      label: newCep.label.trim(),
+      fee: Number(newCep.fee) || 0,
+      estimated_minutes: Number(newCep.estimated_minutes) || 30,
+      active: true,
+    };
+    const updated = [...ceps, rule];
+    setCeps(updated);
+    dataStore.saveDeliveryCeps(updated);
+    setNewCep({ cep: '', label: '', fee: 10, estimated_minutes: 35 });
+    onOrderUpdated();
+  };
+
+  const handleToggleCep = (id: string) => {
+    const updated = ceps.map((c) => (c.id === id ? { ...c, active: !c.active } : c));
+    setCeps(updated);
+    dataStore.saveDeliveryCeps(updated);
+    onOrderUpdated();
+  };
+
+  const handleDeleteCep = (id: string) => {
+    const updated = ceps.filter((c) => c.id !== id);
+    setCeps(updated);
+    dataStore.saveDeliveryCeps(updated);
+    onOrderUpdated();
+  };
+
+  // Handle Product Photo Upload
+  const handleProductImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && editingProduct) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        setEditingProduct({
+          ...editingProduct,
+          image_url: base64,
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Handle Logo Photo Upload
+  const handleLogoImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && storeSettings) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        setStoreSettings({
+          ...storeSettings,
+          logo_url: base64,
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Handle Category Save
+  const handleSaveCategory = async (cat: Category) => {
+    let updated: Category[];
+    if (isNewCategory) {
+      updated = [...categories, cat];
+    } else {
+      updated = categories.map((c) => (c.id === cat.id ? cat : c));
+    }
+    setCategories(updated);
+    dataStore.saveCategories(updated);
+    setEditingCategory(null);
+    setIsNewCategory(false);
+    onOrderUpdated();
+  };
+
+  const handleDeleteCategory = (categoryId: string) => {
+    const hasProducts = products.some((p) => p.category_id === categoryId);
+    if (hasProducts) {
+      alert('Não é possível excluir esta categoria pois existem produtos associados a ela. Mova os produtos antes.');
+      return;
+    }
+    if (confirm('Tem certeza de que deseja excluir esta categoria?')) {
+      const updated = categories.filter((c) => c.id !== categoryId);
+      setCategories(updated);
+      dataStore.saveCategories(updated);
+      onOrderUpdated();
+    }
+  };
+
+  // Handle Product Save
+  const handleSaveProduct = async (prod: Product) => {
+    let updated: Product[];
+    if (isNewProduct) {
+      updated = [prod, ...products];
+    } else {
+      updated = products.map((p) => (p.id === prod.id ? prod : p));
+    }
+    setProducts(updated);
+    dataStore.saveProducts(updated);
+    setEditingProduct(null);
+    setIsNewProduct(false);
+    onOrderUpdated();
+  };
+
+  const handleDeleteProduct = (productId: string) => {
+    if (confirm('Tem certeza de que deseja excluir este produto do cardápio?')) {
+      const updated = products.filter((p) => p.id !== productId);
+      setProducts(updated);
+      dataStore.saveProducts(updated);
+      onOrderUpdated();
+    }
+  };
+
+  // Handle Supabase Test
   const handleTestSupabase = async () => {
     setSupabaseTest((prev) => ({ ...prev, loading: true }));
     const result = await dataStore.testSupabaseConnection();
@@ -132,7 +351,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  // Quick stats calculation
+  // Stats calculation
   const totalRevenue = orders
     .filter((o) => o.payment_status === 'APPROVED')
     .reduce((sum, o) => sum + o.total, 0);
@@ -141,752 +360,1223 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const preparingCount = orders.filter((o) => o.status === 'PREPARING').length;
   const confirmedCount = orders.filter((o) => o.status === 'CONFIRMED').length;
 
-  return (
-    <div className="fixed inset-0 z-50 overflow-hidden bg-black/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
-      <div className="bg-[#FFFFFF] border border-[#3A2E1F]/15 rounded-3xl max-w-6xl w-full h-[95vh] flex flex-col shadow-2xl overflow-hidden animate-fadeIn">
-        {/* Header */}
-        <div className="bg-[#FAF7F0] px-5 py-4 border-b border-[#3A2E1F]/10 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-[#B8623F] text-white flex items-center justify-center font-serif font-bold text-xl">
-              A
+  // -------------------------------------------------------------
+  // VIEW 1: FULL SCREEN ADMIN LOGIN PAGE (Se não estiver logado)
+  // -------------------------------------------------------------
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-[#FAF7F0] flex flex-col justify-center items-center p-4 selection:bg-[#B8623F] selection:text-white">
+        <div className="max-w-md w-full bg-white border border-[#3A2E1F]/15 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
+          {/* Logo & Header */}
+          <div className="text-center space-y-3">
+            <div className="mx-auto w-16 h-16 rounded-full overflow-hidden border-2 border-[#B8623F]/60 p-0.5 shadow-sm bg-[#FAF7F0] flex items-center justify-center">
+              {storeSettings?.logo_url ? (
+                <img
+                  src={storeSettings.logo_url}
+                  alt="Affeto Pães"
+                  className="w-full h-full rounded-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full bg-[#F3ECDD] rounded-full flex items-center justify-center font-serif font-bold text-3xl text-[#3A2E1F]">
+                  A
+                </div>
+              )}
             </div>
             <div>
-              <h2 className="font-serif font-bold text-lg text-[#3A2E1F]">Painel de Gestão da Padaria</h2>
-              <div className="flex items-center gap-2 text-xs text-[#7E6C58]">
-                <span>Affeto Pães • Produção & Pedidos</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-                <span className="text-[11px] font-mono">Supabase: ropgdbgkjghwdxdglchz</span>
-              </div>
+              <h1 className="font-serif font-bold text-2xl text-[#3A2E1F]">
+                Affeto Pães Artesanais
+              </h1>
+              <p className="text-xs text-[#7E6C58] uppercase tracking-wider font-semibold">
+                Painel Administrativo & Gestão
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={onClose}
-              className="p-2 rounded-full hover:bg-black/5 text-[#7E6C58]"
-            >
-              <X className="w-5 h-5" />
-            </button>
+          {/* Super Admin Notice */}
+          <div className="p-3 bg-[#F3ECDD] border border-[#B7A05E]/30 rounded-2xl text-xs text-[#554432] space-y-1">
+            <div className="flex items-center gap-1.5 font-bold text-[#3A2E1F]">
+              <Lock className="w-3.5 h-3.5 text-[#B8623F]" />
+              <span>Acesso Super Admin Restrito</span>
+            </div>
+            <p className="text-[11px] text-[#7E6C58]">
+              Usuário: <strong className="text-[#3A2E1F]">toledodias87@gmail.com</strong>
+            </p>
+            <p className="text-[11px] text-[#7E6C58]">
+              Senha temporária inicial: <code className="bg-white/80 px-1 rounded text-[#B8623F] font-mono">tamiris123</code>
+            </p>
           </div>
-        </div>
 
-        {/* Tab Navigation */}
-        <div className="bg-white border-b border-[#3A2E1F]/10 px-5 flex items-center gap-2 overflow-x-auto">
-          <button
-            onClick={() => setActiveTab('orders')}
-            className={`py-3 px-3.5 border-b-2 font-bold text-xs sm:text-sm flex items-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
-              activeTab === 'orders'
-                ? 'border-[#B8623F] text-[#B8623F]'
-                : 'border-transparent text-[#7E6C58] hover:text-[#3A2E1F]'
-            }`}
-          >
-            <Kanban className="w-4 h-4" />
-            <span>Kanban de Pedidos ({orders.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('products')}
-            className={`py-3 px-3.5 border-b-2 font-bold text-xs sm:text-sm flex items-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
-              activeTab === 'products'
-                ? 'border-[#B8623F] text-[#B8623F]'
-                : 'border-transparent text-[#7E6C58] hover:text-[#3A2E1F]'
-            }`}
-          >
-            <Package className="w-4 h-4" />
-            <span>Catálogo & Estoque ({products.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('coupons')}
-            className={`py-3 px-3.5 border-b-2 font-bold text-xs sm:text-sm flex items-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
-              activeTab === 'coupons'
-                ? 'border-[#B8623F] text-[#B8623F]'
-                : 'border-transparent text-[#7E6C58] hover:text-[#3A2E1F]'
-            }`}
-          >
-            <Ticket className="w-4 h-4" />
-            <span>Cupons & Taxas de Entrega</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('supabase')}
-            className={`py-3 px-3.5 border-b-2 font-bold text-xs sm:text-sm flex items-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
-              activeTab === 'supabase'
-                ? 'border-[#B8623F] text-[#B8623F]'
-                : 'border-transparent text-[#7E6C58] hover:text-[#3A2E1F]'
-            }`}
-          >
-            <Database className="w-4 h-4" />
-            <span>Supabase & SQL DDL</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('settings')}
-            className={`py-3 px-3.5 border-b-2 font-bold text-xs sm:text-sm flex items-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
-              activeTab === 'settings'
-                ? 'border-[#B8623F] text-[#B8623F]'
-                : 'border-transparent text-[#7E6C58] hover:text-[#3A2E1F]'
-            }`}
-          >
-            <Settings className="w-4 h-4" />
-            <span>Configurações da Loja</span>
-          </button>
-        </div>
-
-        {/* Tab Content Area */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-[#FAF7F0]/40">
-          {/* TAB 1: KANBAN DE PEDIDOS */}
-          {activeTab === 'orders' && (
-            <div className="space-y-6">
-              {/* Metrics Bar */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="bg-white p-3.5 rounded-2xl border border-[#3A2E1F]/10 shadow-2xs">
-                  <span className="text-[11px] text-[#7E6C58]">Receita Aprovada</span>
-                  <span className="block font-serif font-bold text-xl text-[#3A2E1F] mt-0.5">
-                    R$ {totalRevenue.toFixed(2).replace('.', ',')}
-                  </span>
-                </div>
-                <div className="bg-white p-3.5 rounded-2xl border border-[#3A2E1F]/10 shadow-2xs">
-                  <span className="text-[11px] text-[#7E6C58]">Aguardando Pagamento</span>
-                  <span className="block font-serif font-bold text-xl text-amber-600 mt-0.5">
-                    {pendingCount}
-                  </span>
-                </div>
-                <div className="bg-white p-3.5 rounded-2xl border border-[#3A2E1F]/10 shadow-2xs">
-                  <span className="text-[11px] text-[#7E6C58]">Na Fornada / Preparo</span>
-                  <span className="block font-serif font-bold text-xl text-[#B8623F] mt-0.5">
-                    {preparingCount}
-                  </span>
-                </div>
-                <div className="bg-white p-3.5 rounded-2xl border border-[#3A2E1F]/10 shadow-2xs">
-                  <span className="text-[11px] text-[#7E6C58]">Total de Pedidos</span>
-                  <span className="block font-serif font-bold text-xl text-[#3A2E1F] mt-0.5">
-                    {orders.length}
-                  </span>
-                </div>
-              </div>
-
-              {/* Kanban Columns */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-start">
-                {/* Column 1: Pendentes de Pagamento */}
-                <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-3.5 space-y-3">
-                  <div className="flex justify-between items-center pb-2 border-b border-black/5">
-                    <span className="font-bold text-xs text-[#3A2E1F] flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-amber-500" />
-                      Aguardando PIX/Cartão
-                    </span>
-                    <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
-                      {orders.filter((o) => o.status === 'PENDING_PAYMENT').length}
-                    </span>
-                  </div>
-
-                  <div className="space-y-2.5 max-h-[60vh] overflow-y-auto pr-1">
-                    {orders
-                      .filter((o) => o.status === 'PENDING_PAYMENT')
-                      .map((o) => (
-                        <div
-                          key={o.id}
-                          onClick={() => setSelectedOrder(o)}
-                          className="p-3 rounded-xl border border-black/10 hover:border-[#B8623F] bg-[#FAF7F0]/60 cursor-pointer transition-all space-y-2 text-xs"
-                        >
-                          <div className="flex justify-between items-start">
-                            <span className="font-mono font-bold text-[#3A2E1F]">{o.code}</span>
-                            <span className="font-bold text-[#B8623F]">R$ {o.total.toFixed(2)}</span>
-                          </div>
-                          <p className="font-semibold text-[#3A2E1F] truncate">{o.customer_name}</p>
-                          <span className="text-[10px] text-[#7E6C58] block">
-                            {o.items.length} itens • {o.delivery_type === 'DELIVERY' ? 'Entrega' : 'Retirada'}
-                          </span>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAdvanceStatus(o, 'CONFIRMED', 'Aprovado manualmente pelo Atendente');
-                            }}
-                            className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold"
-                          >
-                            Confirmar Pagamento
-                          </button>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-
-                {/* Column 2: Confirmados / Fila de Produção */}
-                <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-3.5 space-y-3">
-                  <div className="flex justify-between items-center pb-2 border-b border-black/5">
-                    <span className="font-bold text-xs text-[#3A2E1F] flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-blue-500" />
-                      Confirmados (Fila)
-                    </span>
-                    <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
-                      {orders.filter((o) => o.status === 'CONFIRMED').length}
-                    </span>
-                  </div>
-
-                  <div className="space-y-2.5 max-h-[60vh] overflow-y-auto pr-1">
-                    {orders
-                      .filter((o) => o.status === 'CONFIRMED')
-                      .map((o) => (
-                        <div
-                          key={o.id}
-                          onClick={() => setSelectedOrder(o)}
-                          className="p-3 rounded-xl border border-black/10 hover:border-[#B8623F] bg-blue-50/30 cursor-pointer transition-all space-y-2 text-xs"
-                        >
-                          <div className="flex justify-between items-start">
-                            <span className="font-mono font-bold text-[#3A2E1F]">{o.code}</span>
-                            <span className="font-bold text-[#B8623F]">R$ {o.total.toFixed(2)}</span>
-                          </div>
-                          <p className="font-semibold text-[#3A2E1F] truncate">{o.customer_name}</p>
-                          <span className="text-[10px] text-[#7E6C58] block">
-                            Fornada: {o.scheduled_time}
-                          </span>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAdvanceStatus(o, 'PREPARING', 'Pães colocados no forno');
-                            }}
-                            className="w-full py-1.5 bg-[#B8623F] hover:bg-[#994E30] text-white rounded-lg text-[10px] font-bold"
-                          >
-                            Iniciar Fornada / Preparo
-                          </button>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-
-                {/* Column 3: Na Fornada / Preparo */}
-                <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-3.5 space-y-3">
-                  <div className="flex justify-between items-center pb-2 border-b border-black/5">
-                    <span className="font-bold text-xs text-[#3A2E1F] flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
-                      Em Preparo / Fornada
-                    </span>
-                    <span className="text-[10px] font-bold bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full">
-                      {orders.filter((o) => o.status === 'PREPARING').length}
-                    </span>
-                  </div>
-
-                  <div className="space-y-2.5 max-h-[60vh] overflow-y-auto pr-1">
-                    {orders
-                      .filter((o) => o.status === 'PREPARING')
-                      .map((o) => (
-                        <div
-                          key={o.id}
-                          onClick={() => setSelectedOrder(o)}
-                          className="p-3 rounded-xl border border-black/10 hover:border-[#B8623F] bg-orange-50/40 cursor-pointer transition-all space-y-2 text-xs"
-                        >
-                          <div className="flex justify-between items-start">
-                            <span className="font-mono font-bold text-[#3A2E1F]">{o.code}</span>
-                            <span className="font-bold text-[#B8623F]">R$ {o.total.toFixed(2)}</span>
-                          </div>
-                          <p className="font-semibold text-[#3A2E1F] truncate">{o.customer_name}</p>
-                          <div className="flex gap-1.5">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const next = o.delivery_type === 'DELIVERY' ? 'OUT_FOR_DELIVERY' : 'READY';
-                                handleAdvanceStatus(o, next, 'Pães assados e embalados com sucesso');
-                              }}
-                              className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold"
-                            >
-                              {o.delivery_type === 'DELIVERY' ? 'Despachar Entrega' : 'Pronto no Balcão'}
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-
-                {/* Column 4: Prontos / Entregues */}
-                <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-3.5 space-y-3">
-                  <div className="flex justify-between items-center pb-2 border-b border-black/5">
-                    <span className="font-bold text-xs text-[#3A2E1F] flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                      Prontos & Concluídos
-                    </span>
-                    <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                      {
-                        orders.filter(
-                          (o) =>
-                            o.status === 'READY' ||
-                            o.status === 'OUT_FOR_DELIVERY' ||
-                            o.status === 'DELIVERED' ||
-                            o.status === 'PICKED_UP'
-                        ).length
-                      }
-                    </span>
-                  </div>
-
-                  <div className="space-y-2.5 max-h-[60vh] overflow-y-auto pr-1">
-                    {orders
-                      .filter(
-                        (o) =>
-                          o.status === 'READY' ||
-                          o.status === 'OUT_FOR_DELIVERY' ||
-                          o.status === 'DELIVERED' ||
-                          o.status === 'PICKED_UP'
-                      )
-                      .map((o) => (
-                        <div
-                          key={o.id}
-                          onClick={() => setSelectedOrder(o)}
-                          className="p-3 rounded-xl border border-black/10 hover:border-[#B8623F] bg-white cursor-pointer transition-all space-y-2 text-xs"
-                        >
-                          <div className="flex justify-between items-start">
-                            <span className="font-mono font-bold text-[#3A2E1F]">{o.code}</span>
-                            <span className="text-[10px] px-2 py-0.5 rounded-md font-bold bg-emerald-50 text-emerald-800">
-                              {o.status === 'READY'
-                                ? 'Pronto no Balcão'
-                                : o.status === 'OUT_FOR_DELIVERY'
-                                ? 'Em Trânsito'
-                                : 'Finalizado'}
-                            </span>
-                          </div>
-                          <p className="font-semibold text-[#3A2E1F] truncate">{o.customer_name}</p>
-
-                          {(o.status === 'READY' || o.status === 'OUT_FOR_DELIVERY') && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const next = o.delivery_type === 'DELIVERY' ? 'DELIVERED' : 'PICKED_UP';
-                                handleAdvanceStatus(o, next, 'Entregue ao cliente com sucesso');
-                              }}
-                              className="w-full py-1.5 bg-[#3A2E1F] hover:bg-[#554432] text-white rounded-lg text-[10px] font-bold"
-                            >
-                              Finalizar Entrega
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              </div>
+          {loginError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>{loginError}</span>
             </div>
           )}
 
-          {/* TAB 2: CATÁLOGO & ESTOQUE */}
-          {activeTab === 'products' && (
-            <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h3 className="font-serif font-bold text-lg text-[#3A2E1F]">
-                    Gerenciamento de Produtos & Estoque
+          {/* Login Form */}
+          <form onSubmit={handleLoginSubmit} className="space-y-4 text-xs">
+            <div>
+              <label className="block font-semibold text-[#554432] mb-1">
+                E-mail do Administrador
+              </label>
+              <input
+                id="input-login-admin-email"
+                type="email"
+                required
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+                placeholder="seu-email@exemplo.com"
+                className="w-full p-3 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#B8623F]/30 text-[#3A2E1F]"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold text-[#554432] mb-1">
+                Senha de Acesso
+              </label>
+              <div className="relative">
+                <input
+                  id="input-login-admin-senha"
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="Digite sua senha"
+                  className="w-full p-3 pr-10 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#B8623F]/30 text-[#3A2E1F]"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#7E6C58] hover:text-[#3A2E1F]"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <button
+              id="btn-login-admin-submit"
+              type="submit"
+              className="w-full py-3 bg-[#B8623F] hover:bg-[#994E30] text-white font-semibold rounded-xl cursor-pointer shadow-md transition-all text-sm mt-2 flex items-center justify-center gap-2"
+            >
+              <Lock className="w-4 h-4" />
+              <span>Entrar no Painel</span>
+            </button>
+          </form>
+
+          {/* Back to store */}
+          <div className="text-center pt-2 border-t border-[#3A2E1F]/10">
+            <button
+              onClick={onClose}
+              className="text-xs text-[#7E6C58] hover:text-[#B8623F] transition-colors flex items-center justify-center gap-1.5 mx-auto font-medium cursor-pointer"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Voltar para o Cardápio da Loja</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------
+  // VIEW 2: FULL SCREEN COMPLETE ADMIN DASHBOARD (Logado)
+  // -------------------------------------------------------------
+  return (
+    <div className="min-h-screen bg-[#F8F6F0] text-[#3A2E1F] flex flex-col selection:bg-[#B8623F] selection:text-white">
+      {/* Admin Top Navigation Header */}
+      <header className="bg-white border-b border-[#3A2E1F]/10 sticky top-0 z-30 shadow-xs">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            {/* Brand Logo & Name */}
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-[#B8623F]/60 p-0.5 shadow-xs bg-[#FAF7F0] flex items-center justify-center shrink-0">
+                {storeSettings?.logo_url ? (
+                  <img
+                    src={storeSettings.logo_url}
+                    alt="Affeto Logo"
+                    className="w-full h-full rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-[#F3ECDD] rounded-full flex items-center justify-center font-serif font-bold text-lg text-[#3A2E1F]">
+                    A
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="font-serif font-bold text-lg tracking-tight text-[#3A2E1F]">
+                    Affeto Pães • Painel Administrativo
+                  </h1>
+                  <span className="hidden sm:inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                    Online
+                  </span>
+                </div>
+                <p className="text-[11px] text-[#7E6C58]">
+                  Cidade Base: <strong className="text-[#3A2E1F]">{storeSettings?.city || 'Espera Feliz'}-{storeSettings?.state || 'MG'}</strong>
+                </p>
+              </div>
+            </div>
+
+            {/* Admin Profile & Actions */}
+            <div className="flex items-center gap-2.5 text-xs">
+              <div className="hidden md:flex flex-col text-right">
+                <span className="font-bold text-[#3A2E1F]">toledodias87@gmail.com</span>
+                <span className="text-[10px] text-[#B8623F] font-semibold">Super Administrador</span>
+              </div>
+
+              {/* Change Password Button */}
+              <button
+                id="btn-admin-alterar-senha"
+                onClick={() => {
+                  setPasswordChangeStatus(null);
+                  setShowChangePasswordModal(true);
+                }}
+                className="px-3 py-1.5 rounded-xl border border-[#3A2E1F]/15 bg-[#FAF7F0] hover:bg-[#EADBBA]/50 text-[#3A2E1F] transition-colors flex items-center gap-1.5 font-medium cursor-pointer"
+                title="Alterar Senha do Super Admin"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-[#B8623F]" />
+                <span className="hidden sm:inline">Alterar Senha</span>
+              </button>
+
+              {/* View Store Button */}
+              <button
+                id="btn-admin-ver-loja"
+                onClick={onClose}
+                className="px-3 py-1.5 rounded-xl bg-[#B8623F] hover:bg-[#994E30] text-white transition-colors flex items-center gap-1.5 font-semibold cursor-pointer shadow-xs"
+                title="Ir para o cardápio da loja"
+              >
+                <Store className="w-3.5 h-3.5" />
+                <span>Ver Loja</span>
+              </button>
+
+              {/* Logout Button */}
+              <button
+                id="btn-admin-logout"
+                onClick={handleLogout}
+                className="p-1.5 rounded-xl hover:bg-rose-50 text-[#7E6C58] hover:text-rose-600 transition-colors cursor-pointer"
+                title="Encerrar Sessão"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Navigation Tabs Bar */}
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pt-3 border-t border-[#3A2E1F]/10 mt-3 text-xs">
+            <button
+              id="tab-admin-pedidos"
+              onClick={() => setActiveTab('orders')}
+              className={`px-3 py-2 rounded-xl font-medium transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                activeTab === 'orders'
+                  ? 'bg-[#3A2E1F] text-white shadow-xs font-semibold'
+                  : 'text-[#7E6C58] hover:bg-black/5 hover:text-[#3A2E1F]'
+              }`}
+            >
+              <Kanban className="w-3.5 h-3.5" />
+              <span>Pedidos & Fornadas ({orders.length})</span>
+            </button>
+
+            <button
+              id="tab-admin-produtos"
+              onClick={() => setActiveTab('products')}
+              className={`px-3 py-2 rounded-xl font-medium transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                activeTab === 'products'
+                  ? 'bg-[#3A2E1F] text-white shadow-xs font-semibold'
+                  : 'text-[#7E6C58] hover:bg-black/5 hover:text-[#3A2E1F]'
+              }`}
+            >
+              <Package className="w-3.5 h-3.5" />
+              <span>Produtos & Fotos ({products.length})</span>
+            </button>
+
+            <button
+              id="tab-admin-categorias"
+              onClick={() => setActiveTab('categories')}
+              className={`px-3 py-2 rounded-xl font-medium transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                activeTab === 'categories'
+                  ? 'bg-[#3A2E1F] text-white shadow-xs font-semibold'
+                  : 'text-[#7E6C58] hover:bg-black/5 hover:text-[#3A2E1F]'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Categorias do Cardápio ({categories.length})</span>
+            </button>
+
+            <button
+              id="tab-admin-ceps"
+              onClick={() => setActiveTab('ceps')}
+              className={`px-3 py-2 rounded-xl font-medium transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                activeTab === 'ceps'
+                  ? 'bg-[#3A2E1F] text-white shadow-xs font-semibold'
+                  : 'text-[#7E6C58] hover:bg-black/5 hover:text-[#3A2E1F]'
+              }`}
+            >
+              <MapPin className="w-3.5 h-3.5" />
+              <span>CEPs & Frete da Rota ({ceps.length})</span>
+            </button>
+
+            <button
+              id="tab-admin-cupons"
+              onClick={() => setActiveTab('coupons')}
+              className={`px-3 py-2 rounded-xl font-medium transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                activeTab === 'coupons'
+                  ? 'bg-[#3A2E1F] text-white shadow-xs font-semibold'
+                  : 'text-[#7E6C58] hover:bg-black/5 hover:text-[#3A2E1F]'
+              }`}
+            >
+              <Ticket className="w-3.5 h-3.5" />
+              <span>Cupons de Desconto</span>
+            </button>
+
+            <button
+              id="tab-admin-config"
+              onClick={() => setActiveTab('settings')}
+              className={`px-3 py-2 rounded-xl font-medium transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                activeTab === 'settings'
+                  ? 'bg-[#3A2E1F] text-white shadow-xs font-semibold'
+                  : 'text-[#7E6C58] hover:bg-black/5 hover:text-[#3A2E1F]'
+              }`}
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>Logotipo & Configurações da Loja</span>
+            </button>
+
+            <button
+              id="tab-admin-supabase"
+              onClick={() => setActiveTab('supabase')}
+              className={`px-3 py-2 rounded-xl font-medium transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                activeTab === 'supabase'
+                  ? 'bg-[#3A2E1F] text-white shadow-xs font-semibold'
+                  : 'text-[#7E6C58] hover:bg-black/5 hover:text-[#3A2E1F]'
+              }`}
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>Banco de Dados (Supabase)</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Admin Page Content */}
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        {/* KPI Header Bar */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-4 shadow-2xs">
+            <span className="text-[11px] text-[#7E6C58] uppercase font-bold block">Faturamento Total</span>
+            <span className="font-serif font-bold text-xl text-[#3A2E1F]">
+              R$ {totalRevenue.toFixed(2).replace('.', ',')}
+            </span>
+          </div>
+          <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-4 shadow-2xs">
+            <span className="text-[11px] text-[#7E6C58] uppercase font-bold block">Aguardando Pagamento</span>
+            <span className="font-serif font-bold text-xl text-amber-600">{pendingCount}</span>
+          </div>
+          <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-4 shadow-2xs">
+            <span className="text-[11px] text-[#7E6C58] uppercase font-bold block">Confirmados / Fornada</span>
+            <span className="font-serif font-bold text-xl text-[#B8623F]">{confirmedCount}</span>
+          </div>
+          <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-4 shadow-2xs">
+            <span className="text-[11px] text-[#7E6C58] uppercase font-bold block">Em Preparo / Forno</span>
+            <span className="font-serif font-bold text-xl text-emerald-600">{preparingCount}</span>
+          </div>
+        </div>
+
+        {/* ------------------------------------------------------------- */}
+        {/* TAB 1: PEDIDOS & KANBAN */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'orders' && (
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="font-serif font-bold text-xl text-[#3A2E1F]">
+                  Painel de Pedidos & Esteira de Fornadas
+                </h2>
+                <p className="text-xs text-[#7E6C58]">
+                  Acompanhe os pedidos em tempo real e avance as etapas de preparo e entrega.
+                </p>
+              </div>
+              <button
+                onClick={onOrderUpdated}
+                className="px-3 py-1.5 rounded-xl border border-[#3A2E1F]/20 text-xs font-medium hover:bg-white flex items-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Atualizar</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              {/* Coluna 1: Pendentes */}
+              <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-3.5 space-y-3">
+                <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
+                  <h3 className="font-bold text-xs text-[#3A2E1F] flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Aguardando Pagamento</span>
                   </h3>
-                  <p className="text-xs text-[#7E6C58]">
-                    Ajuste preços, estoque em tempo real e produtos em destaque.
-                  </p>
+                  <span className="text-[11px] font-bold bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full">
+                    {orders.filter((o) => o.status === 'PENDING_PAYMENT').length}
+                  </span>
+                </div>
+                <div className="space-y-2.5">
+                  {orders
+                    .filter((o) => o.status === 'PENDING_PAYMENT')
+                    .map((o) => (
+                      <div
+                        key={o.id}
+                        onClick={() => setSelectedOrder(o)}
+                        className="p-3 bg-[#FAF7F0] hover:bg-[#F3ECDD] border border-[#3A2E1F]/10 rounded-xl cursor-pointer transition-all text-xs space-y-1.5"
+                      >
+                        <div className="flex justify-between font-mono font-bold text-[#3A2E1F]">
+                          <span>{o.code}</span>
+                          <span className="text-[#B8623F]">R$ {o.total.toFixed(2)}</span>
+                        </div>
+                        <p className="font-semibold text-[#3A2E1F] truncate">{o.customer_name}</p>
+                        <div className="text-[11px] text-[#7E6C58]">
+                          {o.items.length} itens • {o.delivery_type === 'DELIVERY' ? 'Entrega' : 'Retirada'}
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAdvanceStatus(o, 'CONFIRMED', 'Pagamento aprovado manualmente pelo admin');
+                          }}
+                          className="w-full mt-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold"
+                        >
+                          Confirmar Pagamento
+                        </button>
+                      </div>
+                    ))}
                 </div>
               </div>
 
-              <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl overflow-hidden shadow-2xs">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-[#FAF7F0] border-b border-[#3A2E1F]/10 text-[#7E6C58] uppercase text-[10px] font-bold">
-                      <tr>
-                        <th className="p-3">Produto</th>
-                        <th className="p-3">Categoria</th>
-                        <th className="p-3">Preço Base</th>
-                        <th className="p-3">Preço Promo</th>
-                        <th className="p-3">Estoque</th>
-                        <th className="p-3">Status</th>
-                        <th className="p-3 text-right">Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#3A2E1F]/10">
-                      {products.map((p) => {
-                        const cat = categories.find((c) => c.id === p.category_id);
-                        return (
-                          <tr key={p.id} className="hover:bg-[#FAF7F0]/50">
-                            <td className="p-3 flex items-center gap-2.5">
+              {/* Coluna 2: Confirmados / Aguardando Fornada */}
+              <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-3.5 space-y-3">
+                <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
+                  <h3 className="font-bold text-xs text-[#3A2E1F] flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-blue-500" />
+                    <span>Confirmados (Fornada)</span>
+                  </h3>
+                  <span className="text-[11px] font-bold bg-blue-50 text-blue-800 px-2 py-0.5 rounded-full">
+                    {orders.filter((o) => o.status === 'CONFIRMED').length}
+                  </span>
+                </div>
+                <div className="space-y-2.5">
+                  {orders
+                    .filter((o) => o.status === 'CONFIRMED')
+                    .map((o) => (
+                      <div
+                        key={o.id}
+                        onClick={() => setSelectedOrder(o)}
+                        className="p-3 bg-[#FAF7F0] hover:bg-[#F3ECDD] border border-[#3A2E1F]/10 rounded-xl cursor-pointer transition-all text-xs space-y-1.5"
+                      >
+                        <div className="flex justify-between font-mono font-bold text-[#3A2E1F]">
+                          <span>{o.code}</span>
+                          <span className="text-[#B8623F]">R$ {o.total.toFixed(2)}</span>
+                        </div>
+                        <p className="font-semibold text-[#3A2E1F] truncate">{o.customer_name}</p>
+                        <div className="text-[11px] text-[#7E6C58]">
+                          📅 Data: {o.scheduled_date} ({o.scheduled_time})
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAdvanceStatus(o, 'PREPARING', 'Iniciado preparo e fermentação dos pães');
+                          }}
+                          className="w-full mt-2 py-1.5 bg-[#B8623F] hover:bg-[#994E30] text-white rounded-lg text-[10px] font-bold"
+                        >
+                          Iniciar Preparo
+                        </button>
+                      </div>
+                    ))}
+                </div>
+              </div>
+
+              {/* Coluna 3: Em Preparo / Forno */}
+              <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-3.5 space-y-3">
+                <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
+                  <h3 className="font-bold text-xs text-[#3A2E1F] flex items-center gap-1.5">
+                    <Store className="w-3.5 h-3.5 text-amber-600" />
+                    <span>No Forno / Preparando</span>
+                  </h3>
+                  <span className="text-[11px] font-bold bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full">
+                    {orders.filter((o) => o.status === 'PREPARING').length}
+                  </span>
+                </div>
+                <div className="space-y-2.5">
+                  {orders
+                    .filter((o) => o.status === 'PREPARING')
+                    .map((o) => (
+                      <div
+                        key={o.id}
+                        onClick={() => setSelectedOrder(o)}
+                        className="p-3 bg-[#FAF7F0] hover:bg-[#F3ECDD] border border-[#3A2E1F]/10 rounded-xl cursor-pointer transition-all text-xs space-y-1.5"
+                      >
+                        <div className="flex justify-between font-mono font-bold text-[#3A2E1F]">
+                          <span>{o.code}</span>
+                          <span className="text-[#B8623F]">R$ {o.total.toFixed(2)}</span>
+                        </div>
+                        <p className="font-semibold text-[#3A2E1F] truncate">{o.customer_name}</p>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const next = o.delivery_type === 'DELIVERY' ? 'OUT_FOR_DELIVERY' : 'READY';
+                            handleAdvanceStatus(o, next, 'Pães assados e prontos para envio ou retirada');
+                          }}
+                          className="w-full mt-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold"
+                        >
+                          {o.delivery_type === 'DELIVERY' ? 'Despachar Entrega' : 'Pronto para Retirada'}
+                        </button>
+                      </div>
+                    ))}
+                </div>
+              </div>
+
+              {/* Coluna 4: Pronto / Em Rota / Entregue */}
+              <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-3.5 space-y-3">
+                <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
+                  <h3 className="font-bold text-xs text-[#3A2E1F] flex items-center gap-1.5">
+                    <Truck className="w-3.5 h-3.5 text-purple-600" />
+                    <span>Pronto / Em Rota / Final</span>
+                  </h3>
+                  <span className="text-[11px] font-bold bg-purple-50 text-purple-800 px-2 py-0.5 rounded-full">
+                    {orders.filter((o) => ['READY', 'OUT_FOR_DELIVERY', 'DELIVERED', 'PICKED_UP'].includes(o.status)).length}
+                  </span>
+                </div>
+                <div className="space-y-2.5">
+                  {orders
+                    .filter((o) => ['READY', 'OUT_FOR_DELIVERY', 'DELIVERED', 'PICKED_UP'].includes(o.status))
+                    .map((o) => (
+                      <div
+                        key={o.id}
+                        onClick={() => setSelectedOrder(o)}
+                        className="p-3 bg-[#FAF7F0] hover:bg-[#F3ECDD] border border-[#3A2E1F]/10 rounded-xl cursor-pointer transition-all text-xs space-y-1.5"
+                      >
+                        <div className="flex justify-between font-mono font-bold text-[#3A2E1F]">
+                          <span>{o.code}</span>
+                          <span className="text-[10px] uppercase font-bold text-[#7E6C58]">{o.status}</span>
+                        </div>
+                        <p className="font-semibold text-[#3A2E1F] truncate">{o.customer_name}</p>
+                        {(o.status === 'READY' || o.status === 'OUT_FOR_DELIVERY') && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const next = o.delivery_type === 'DELIVERY' ? 'DELIVERED' : 'PICKED_UP';
+                              handleAdvanceStatus(o, next, 'Entregue ao cliente com sucesso');
+                            }}
+                            className="w-full py-1.5 bg-[#3A2E1F] hover:bg-[#554432] text-white rounded-lg text-[10px] font-bold"
+                          >
+                            Finalizar Entrega
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* TAB 2: PRODUTOS & FOTOS (Upload e Gestão de Estoque) */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'products' && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap justify-between items-center gap-3">
+              <div>
+                <h2 className="font-serif font-bold text-xl text-[#3A2E1F]">
+                  Produtos do Cardápio & Fotos
+                </h2>
+                <p className="text-xs text-[#7E6C58]">
+                  Adicione fotos dos produtos, ajuste preços, controle estoques e forneça detalhes das fornadas.
+                </p>
+              </div>
+              <button
+                id="btn-admin-novo-produto"
+                onClick={() => {
+                  const newProd: Product = {
+                    id: `prod-${Date.now()}`,
+                    category_id: categories[0]?.id || 'cat-paes',
+                    name: '',
+                    slug: '',
+                    description: '',
+                    base_price: 25.0,
+                    promotional_price: null,
+                    unit: 'unidade',
+                    is_active: true,
+                    is_featured: false,
+                    stock_quantity: 10,
+                    track_stock: true,
+                    image_url: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=600&q=80',
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                  };
+                  setIsNewProduct(true);
+                  setEditingProduct(newProd);
+                }}
+                className="px-4 py-2 bg-[#B8623F] hover:bg-[#994E30] text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Adicionar Novo Produto</span>
+              </button>
+            </div>
+
+            <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl overflow-hidden shadow-2xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-[#FAF7F0] border-b border-[#3A2E1F]/10 text-[#7E6C58] uppercase text-[10px] font-bold">
+                    <tr>
+                      <th className="p-3.5">Foto & Produto</th>
+                      <th className="p-3.5">Categoria</th>
+                      <th className="p-3.5">Preço Base</th>
+                      <th className="p-3.5">Preço Promo</th>
+                      <th className="p-3.5">Estoque</th>
+                      <th className="p-3.5">Fornadas Agendadas</th>
+                      <th className="p-3.5">Status</th>
+                      <th className="p-3.5 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#3A2E1F]/10">
+                    {products.map((p) => {
+                      const cat = categories.find((c) => c.id === p.category_id);
+                      return (
+                        <tr key={p.id} className="hover:bg-[#FAF7F0]/60 transition-colors">
+                          <td className="p-3.5 flex items-center gap-3">
+                            <div className="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 shrink-0 border border-[#3A2E1F]/10">
                               <img
                                 src={p.image_url}
                                 alt={p.name}
-                                className="w-10 h-10 rounded-lg object-cover bg-gray-100 shrink-0"
+                                className="w-full h-full object-cover"
                               />
-                              <div>
-                                <span className="font-bold text-[#3A2E1F] block">{p.name}</span>
-                                <span className="text-[10px] text-[#7E6C58]">{p.unit}</span>
-                              </div>
+                            </div>
+                            <div>
+                              <span className="font-bold text-[#3A2E1F] block text-sm">{p.name}</span>
+                              <span className="text-[11px] text-[#7E6C58]">{p.unit}</span>
+                            </div>
+                          </td>
+                          <td className="p-3.5 text-[#554432] font-medium">{cat?.name || '-'}</td>
+                          <td className="p-3.5 font-semibold text-[#3A2E1F]">
+                            R$ {p.base_price.toFixed(2)}
+                          </td>
+                          <td className="p-3.5 text-[#B8623F] font-semibold">
+                            {p.promotional_price ? `R$ ${p.promotional_price.toFixed(2)}` : '-'}
+                          </td>
+                          <td className="p-3.5">
+                            <span
+                              className={`font-bold px-2 py-0.5 rounded-full text-[10px] ${
+                                p.stock_quantity <= 3
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-emerald-50 text-emerald-800'
+                              }`}
+                            >
+                              {p.stock_quantity} un
+                            </span>
+                          </td>
+                          <td className="p-3.5">
+                            {p.schedule_config?.is_scheduled_only ? (
+                              <span className="text-[10px] font-semibold text-[#B8623F] bg-[#B8623F]/10 px-2 py-0.5 rounded-full block max-w-fit">
+                                {p.schedule_config.days_label || 'Fornada Programada'}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-[#7E6C58]">Disponível Diário</span>
+                            )}
+                          </td>
+                          <td className="p-3.5">
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${
+                                p.is_active
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-gray-100 text-gray-600'
+                              }`}
+                            >
+                              {p.is_active ? 'Ativo' : 'Pausado'}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-right space-x-1">
+                            <button
+                              onClick={() => {
+                                setIsNewProduct(false);
+                                setEditingProduct({ ...p });
+                              }}
+                              className="p-1.5 rounded-lg text-[#3A2E1F] hover:bg-[#FAF7F0] cursor-pointer"
+                              title="Editar Produto & Foto"
+                            >
+                              <Edit2 className="w-4 h-4 text-[#B8623F]" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteProduct(p.id)}
+                              className="p-1.5 rounded-lg text-[#7E6C58] hover:bg-rose-50 hover:text-rose-600 cursor-pointer"
+                              title="Excluir Produto"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* TAB 3: CATEGORIAS DO CARDÁPIO (Edição Completa) */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'categories' && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap justify-between items-center gap-3">
+              <div>
+                <h2 className="font-serif font-bold text-xl text-[#3A2E1F]">
+                  Categorias do Cardápio
+                </h2>
+                <p className="text-xs text-[#7E6C58]">
+                  Organize o cardápio, adicione novas seções e altere os nomes exibidos aos clientes.
+                </p>
+              </div>
+              <button
+                id="btn-admin-nova-categoria"
+                onClick={() => {
+                  const newCat: Category = {
+                    id: `cat-${Date.now()}`,
+                    name: '',
+                    slug: '',
+                    description: '',
+                    sort_order: categories.length + 1,
+                    active: true,
+                    image_url: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=600&q=80',
+                  };
+                  setIsNewCategory(true);
+                  setEditingCategory(newCat);
+                }}
+                className="px-4 py-2 bg-[#B8623F] hover:bg-[#994E30] text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Adicionar Nova Categoria</span>
+              </button>
+            </div>
+
+            <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl overflow-hidden shadow-2xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-[#FAF7F0] border-b border-[#3A2E1F]/10 text-[#7E6C58] uppercase text-[10px] font-bold">
+                    <tr>
+                      <th className="p-3.5">Ordem</th>
+                      <th className="p-3.5">Nome da Categoria</th>
+                      <th className="p-3.5">Descrição</th>
+                      <th className="p-3.5">Produtos Vinculados</th>
+                      <th className="p-3.5">Status</th>
+                      <th className="p-3.5 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#3A2E1F]/10">
+                    {categories
+                      .sort((a, b) => a.sort_order - b.sort_order)
+                      .map((cat) => {
+                        const count = products.filter((p) => p.category_id === cat.id).length;
+                        return (
+                          <tr key={cat.id} className="hover:bg-[#FAF7F0]/60 transition-colors">
+                            <td className="p-3.5 font-bold text-[#7E6C58]">#{cat.sort_order}</td>
+                            <td className="p-3.5 font-serif font-bold text-sm text-[#3A2E1F]">
+                              {cat.name}
                             </td>
-                            <td className="p-3 text-[#7E6C58]">{cat?.name || '-'}</td>
-                            <td className="p-3 font-semibold text-[#3A2E1F]">
-                              R$ {p.base_price.toFixed(2)}
+                            <td className="p-3.5 text-[#7E6C58] max-w-xs truncate">
+                              {cat.description || '-'}
                             </td>
-                            <td className="p-3 text-[#B8623F]">
-                              {p.promotional_price ? `R$ ${p.promotional_price.toFixed(2)}` : '-'}
-                            </td>
-                            <td className="p-3">
-                              <span
-                                className={`font-bold px-2 py-0.5 rounded-full text-[10px] ${
-                                  p.stock_quantity <= 5
-                                    ? 'bg-amber-100 text-amber-800'
-                                    : 'bg-emerald-50 text-emerald-800'
-                                }`}
-                              >
-                                {p.stock_quantity} un
+                            <td className="p-3.5">
+                              <span className="px-2 py-0.5 rounded-full bg-[#FAF7F0] text-[#3A2E1F] font-semibold text-[11px] border border-[#3A2E1F]/10">
+                                {count} produtos
                               </span>
                             </td>
-                            <td className="p-3">
+                            <td className="p-3.5">
                               <span
                                 className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${
-                                  p.is_active
+                                  cat.active
                                     ? 'bg-emerald-100 text-emerald-800'
                                     : 'bg-gray-100 text-gray-600'
                                 }`}
                               >
-                                {p.is_active ? 'Ativo' : 'Pausado'}
+                                {cat.active ? 'Ativa' : 'Inativa'}
                               </span>
                             </td>
-                            <td className="p-3 text-right">
+                            <td className="p-3.5 text-right space-x-1">
                               <button
-                                onClick={() => setEditingProduct(p)}
-                                className="p-1.5 rounded-lg text-[#3A2E1F] hover:bg-black/5"
-                                title="Editar Produto"
+                                onClick={() => {
+                                  setIsNewCategory(false);
+                                  setEditingCategory({ ...cat });
+                                }}
+                                className="p-1.5 rounded-lg text-[#3A2E1F] hover:bg-[#FAF7F0] cursor-pointer"
+                                title="Editar Categoria"
                               >
-                                <Edit2 className="w-3.5 h-3.5" />
+                                <Edit2 className="w-4 h-4 text-[#B8623F]" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteCategory(cat.id)}
+                                className="p-1.5 rounded-lg text-[#7E6C58] hover:bg-rose-50 hover:text-rose-600 cursor-pointer"
+                                title="Excluir Categoria"
+                              >
+                                <Trash2 className="w-4 h-4" />
                               </button>
                             </td>
                           </tr>
                         );
                       })}
-                    </tbody>
-                  </table>
-                </div>
+                  </tbody>
+                </table>
               </div>
-            </div>
-          )}
-
-          {/* TAB 3: CUPONS & TAXAS */}
-          {activeTab === 'coupons' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Cupons */}
-              <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-5 space-y-4">
-                <h3 className="font-serif font-bold text-base text-[#3A2E1F] flex items-center gap-2">
-                  <Ticket className="w-4 h-4 text-[#B8623F]" />
-                  <span>Cupons Ativos no Pricing Engine</span>
-                </h3>
-                <div className="space-y-2.5">
-                  {coupons.map((cp) => (
-                    <div
-                      key={cp.id}
-                      className="p-3 rounded-xl border border-[#3A2E1F]/15 bg-[#FAF7F0]/40 flex justify-between items-center text-xs"
-                    >
-                      <div>
-                        <span className="font-mono font-bold text-sm text-[#3A2E1F] block">
-                          {cp.code}
-                        </span>
-                        <span className="text-[11px] text-[#7E6C58]">{cp.description}</span>
-                        <span className="block text-[10px] text-[#554432] mt-0.5">
-                          Usos: {cp.usage_count}
-                        </span>
-                      </div>
-                      <div className="text-right">
-                        <span className="font-bold text-[#B8623F] text-sm block">
-                          {cp.discount_type === 'PERCENTAGE'
-                            ? `${cp.discount_value}% OFF`
-                            : `R$ ${cp.discount_value.toFixed(2)} OFF`}
-                        </span>
-                        <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md font-bold">
-                          Ativo
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Taxas de Entrega */}
-              <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-5 space-y-4">
-                <h3 className="font-serif font-bold text-base text-[#3A2E1F] flex items-center gap-2">
-                  <Truck className="w-4 h-4 text-[#B8623F]" />
-                  <span>Zonas de Entrega & Frete</span>
-                </h3>
-                <div className="space-y-2.5">
-                  {zones.map((zn) => (
-                    <div
-                      key={zn.id}
-                      className="p-3 rounded-xl border border-[#3A2E1F]/15 bg-[#FAF7F0]/40 flex justify-between items-center text-xs"
-                    >
-                      <div>
-                        <span className="font-bold text-[#3A2E1F] block">{zn.name}</span>
-                        <span className="text-[11px] text-[#7E6C58]">{zn.neighborhood}</span>
-                        <span className="text-[10px] text-[#7E6C58] block mt-0.5">
-                          Tempo estimado: {zn.estimated_minutes} min
-                        </span>
-                      </div>
-                      <div className="text-right">
-                        <span className="font-serif font-bold text-sm text-[#3A2E1F]">
-                          R$ {zn.fee.toFixed(2).replace('.', ',')}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 4: SUPABASE & SQL DDL */}
-          {activeTab === 'supabase' && (
-            <div className="space-y-6">
-              {/* Connection Card */}
-              <div className="bg-white border border-[#3A2E1F]/15 rounded-2xl p-5 sm:p-6 space-y-4 shadow-2xs">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div>
-                    <span className="text-[11px] uppercase tracking-wider font-bold text-[#B8623F]">
-                      Instância Oficial Supabase
-                    </span>
-                    <h3 className="font-serif font-bold text-xl text-[#3A2E1F]">
-                      https://ropgdbgkjghwdxdglchz.supabase.co
-                    </h3>
-                    <p className="text-xs text-[#7E6C58] mt-1">
-                      Destino de persistência remota para Affeto Pães com PostgreSQL, Auth e Storage.
-                    </p>
-                  </div>
-
-                  <button
-                    id="btn-testar-conexao-supabase"
-                    onClick={handleTestSupabase}
-                    disabled={supabaseTest.loading}
-                    className="px-5 py-2.5 bg-[#3A2E1F] hover:bg-[#554432] text-white rounded-xl text-xs font-semibold flex items-center gap-2 cursor-pointer transition-colors shadow-xs"
-                  >
-                    {supabaseTest.loading ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Database className="w-3.5 h-3.5" />
-                    )}
-                    <span>Testar Conexão Supabase</span>
-                  </button>
-                </div>
-
-                {supabaseTest.tested && (
-                  <div
-                    className={`p-4 rounded-xl text-xs space-y-1 ${
-                      supabaseTest.connected
-                        ? 'bg-emerald-50 border border-emerald-200 text-emerald-900'
-                        : 'bg-amber-50 border border-amber-200 text-amber-900'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 font-bold">
-                      {supabaseTest.connected ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                      ) : (
-                        <AlertTriangle className="w-4 h-4 text-amber-600" />
-                      )}
-                      <span>
-                        {supabaseTest.connected ? 'Conexão Estabelecida com Sucesso' : 'Diagnóstico de Conexão'}
-                      </span>
-                    </div>
-                    <p>{supabaseTest.message}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* SQL Migration Script Export Card */}
-              <div className="bg-white border border-[#3A2E1F]/15 rounded-2xl p-5 sm:p-6 space-y-4 shadow-2xs">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-serif font-bold text-base text-[#3A2E1F]">
-                      Script DDL Completo PostgreSQL / Supabase
-                    </h4>
-                    <p className="text-xs text-[#7E6C58]">
-                      Criação de todas as 30 tabelas da especificação técnica, tipos enums, triggers e RLS policies.
-                    </p>
-                  </div>
-                  <button
-                    id="btn-copiar-sql-supabase"
-                    onClick={handleCopySql}
-                    className="px-4 py-2 bg-[#B8623F] hover:bg-[#994E30] text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-                  >
-                    {copiedSql ? (
-                      <>
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Script SQL Copiado!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Copiar SQL para Supabase</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                <div className="relative">
-                  <pre className="bg-[#1E1B18] text-[#E0CFA0] p-4 rounded-xl text-xs font-mono max-h-80 overflow-y-auto leading-relaxed border border-black/20">
-                    {SUPABASE_FULL_SCHEMA_SQL}
-                  </pre>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 5: CONFIGURAÇÕES DA LOJA */}
-          {activeTab === 'settings' && storeSettings && (
-            <div className="bg-white border border-[#3A2E1F]/15 rounded-2xl p-6 max-w-2xl space-y-4 shadow-2xs">
-              <h3 className="font-serif font-bold text-lg text-[#3A2E1F]">
-                Informações da Padaria & Atendimento
-              </h3>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div>
-                  <label className="block font-semibold text-[#554432] mb-1">Nome Comercial</label>
-                  <input
-                    type="text"
-                    value={storeSettings.name}
-                    onChange={(e) =>
-                      setStoreSettings({ ...storeSettings, name: e.target.value })
-                    }
-                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-[#554432] mb-1">Chave PIX Oficial</label>
-                  <input
-                    type="text"
-                    value={storeSettings.pix_key}
-                    onChange={(e) =>
-                      setStoreSettings({ ...storeSettings, pix_key: e.target.value })
-                    }
-                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block font-semibold text-[#554432] mb-1">Endereço da Loja</label>
-                  <input
-                    type="text"
-                    value={storeSettings.address}
-                    onChange={(e) =>
-                      setStoreSettings({ ...storeSettings, address: e.target.value })
-                    }
-                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-[#554432] mb-1">WhatsApp de Contato</label>
-                  <input
-                    type="text"
-                    value={storeSettings.whatsapp}
-                    onChange={(e) =>
-                      setStoreSettings({ ...storeSettings, whatsapp: e.target.value })
-                    }
-                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-[#554432] mb-1">Tempo Médio de Preparo (min)</label>
-                  <input
-                    type="number"
-                    value={storeSettings.lead_time_minutes}
-                    onChange={(e) =>
-                      setStoreSettings({ ...storeSettings, lead_time_minutes: Number(e.target.value) })
-                    }
-                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  onClick={() => {
-                    dataStore.saveStoreSettings(storeSettings);
-                    alert('Configurações salvas com sucesso!');
-                  }}
-                  className="px-5 py-2.5 bg-[#B8623F] hover:bg-[#994E30] text-white rounded-xl text-xs font-semibold cursor-pointer shadow-xs"
-                >
-                  Salvar Alterações
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ORDER DETAILS MODAL (AUDIT & ITEMS) */}
-        {selectedOrder && (
-          <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-            <div className="bg-white border border-[#3A2E1F]/15 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-start">
-                <div>
-                  <span className="text-[10px] font-bold text-[#B8623F] uppercase">Detalhes do Pedido</span>
-                  <h3 className="font-serif font-bold text-xl text-[#3A2E1F]">{selectedOrder.code}</h3>
-                </div>
-                <button
-                  onClick={() => setSelectedOrder(null)}
-                  className="p-1.5 rounded-full hover:bg-black/5 text-[#7E6C58]"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="p-3.5 bg-[#FAF7F0] rounded-2xl space-y-1.5 text-xs text-[#554432]">
-                <div className="flex justify-between">
-                  <span>Cliente:</span>
-                  <span className="font-bold text-[#3A2E1F]">{selectedOrder.customer_name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Telefone:</span>
-                  <span>{selectedOrder.customer_phone}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Horário Agendado:</span>
-                  <span className="font-semibold text-[#3A2E1F]">{selectedOrder.scheduled_time}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Status Atual:</span>
-                  <span className="font-bold text-[#B8623F]">{selectedOrder.status}</span>
-                </div>
-              </div>
-
-              {/* Items */}
-              <div className="space-y-1.5">
-                <h4 className="font-bold text-xs text-[#3A2E1F]">Itens</h4>
-                <div className="border border-[#3A2E1F]/10 rounded-xl divide-y text-xs">
-                  {selectedOrder.items.map((it) => (
-                    <div key={it.id} className="p-2.5 flex justify-between">
-                      <span>{it.quantity}x {it.product_name}</span>
-                      <span className="font-bold">R$ {it.subtotal.toFixed(2)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Audit history */}
-              {selectedOrder.status_history && (
-                <div className="space-y-1.5">
-                  <h4 className="font-bold text-xs text-[#3A2E1F]">Histórico de Auditoria</h4>
-                  <div className="space-y-1 text-[11px] text-[#7E6C58]">
-                    {selectedOrder.status_history.map((h) => (
-                      <div key={h.id} className="p-2 bg-gray-50 rounded-lg flex justify-between">
-                        <span>{h.new_status} ({h.changed_by})</span>
-                        <span className="text-[10px]">{new Date(h.created_at).toLocaleTimeString()}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         )}
 
-        {/* EDIT PRODUCT MODAL */}
-        {editingProduct && (
-          <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-            <div className="bg-white border border-[#3A2E1F]/15 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
-              <div className="flex justify-between items-center">
-                <h3 className="font-serif font-bold text-lg text-[#3A2E1F]">Editar Produto</h3>
-                <button
-                  onClick={() => setEditingProduct(null)}
-                  className="p-1 rounded-full hover:bg-black/5"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+        {/* ------------------------------------------------------------- */}
+        {/* TAB 4: CEPS & FRETE DA ROTA */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'ceps' && (
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="font-serif font-bold text-xl text-[#3A2E1F]">
+                  CEPs Atendidos & Taxas Individuais de Frete
+                </h2>
+                <p className="text-xs text-[#7E6C58]">
+                  Defina os CEPs atendidos pela entrega própria da padaria e a taxa de frete correspondente.
+                </p>
+              </div>
+            </div>
+
+            {/* Form to add CEP rule */}
+            <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-5 shadow-2xs space-y-4">
+              <h3 className="font-bold text-sm text-[#3A2E1F] flex items-center gap-2">
+                <Plus className="w-4 h-4 text-[#B8623F]" />
+                <span>Cadastrar Novo CEP de Entrega</span>
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">CEP (ou prefixo)</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: 36830-000 ou 36830"
+                    value={newCep.cep}
+                    onChange={(e) => setNewCep({ ...newCep, cep: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0] focus:bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">Bairro / Rota de Entrega</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Centro / Espera Feliz"
+                    value={newCep.label}
+                    onChange={(e) => setNewCep({ ...newCep, label: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0] focus:bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">Taxa de Frete (R$)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={newCep.fee}
+                    onChange={(e) => setNewCep({ ...newCep, fee: Number(e.target.value) })}
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0] focus:bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">Tempo Estimado (min)</label>
+                  <input
+                    type="number"
+                    value={newCep.estimated_minutes}
+                    onChange={(e) =>
+                      setNewCep({ ...newCep, estimated_minutes: Number(e.target.value) })
+                    }
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0] focus:bg-white"
+                  />
+                </div>
+              </div>
+              <button
+                onClick={handleAddCep}
+                className="px-4 py-2 bg-[#B8623F] hover:bg-[#994E30] text-white rounded-xl text-xs font-semibold cursor-pointer shadow-xs"
+              >
+                Cadastrar Rota de CEP
+              </button>
+            </div>
+
+            {/* List of CEPs */}
+            <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl overflow-hidden shadow-2xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-[#FAF7F0] border-b border-[#3A2E1F]/10 text-[#7E6C58] uppercase text-[10px] font-bold">
+                    <tr>
+                      <th className="p-3">CEP Atendido</th>
+                      <th className="p-3">Região / Bairro</th>
+                      <th className="p-3">Taxa de Frete</th>
+                      <th className="p-3">Tempo Estimado</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#3A2E1F]/10">
+                    {ceps.map((rule) => (
+                      <tr key={rule.id} className="hover:bg-[#FAF7F0]/50">
+                        <td className="p-3 font-mono font-bold text-[#3A2E1F]">{rule.cep}</td>
+                        <td className="p-3 text-[#554432]">{rule.label || '-'}</td>
+                        <td className="p-3 font-bold text-[#B8623F]">R$ {rule.fee.toFixed(2)}</td>
+                        <td className="p-3 text-[#7E6C58]">{rule.estimated_minutes || 30} min</td>
+                        <td className="p-3">
+                          <button
+                            onClick={() => handleToggleCep(rule.id)}
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer ${
+                              rule.active
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-gray-100 text-gray-500'
+                            }`}
+                          >
+                            {rule.active ? 'Ativo' : 'Pausado'}
+                          </button>
+                        </td>
+                        <td className="p-3 text-right">
+                          <button
+                            onClick={() => handleDeleteCep(rule.id)}
+                            className="p-1 text-gray-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
+                            title="Remover CEP"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* TAB 5: CUPONS DE DESCONTO */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'coupons' && (
+          <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-5 shadow-2xs space-y-4">
+            <h2 className="font-serif font-bold text-xl text-[#3A2E1F] flex items-center gap-2">
+              <Ticket className="w-5 h-5 text-[#B8623F]" />
+              <span>Cupons de Desconto Cadastrados</span>
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+              {coupons.map((cp) => (
+                <div key={cp.id} className="p-3.5 bg-[#FAF7F0] border border-[#3A2E1F]/10 rounded-xl space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="font-mono font-bold text-sm text-[#B8623F] bg-white px-2 py-0.5 rounded border border-[#B8623F]/20">
+                      {cp.code}
+                    </span>
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                      {cp.active ? 'Ativo' : 'Inativo'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[#7E6C58]">{cp.description}</p>
+                  <div className="text-xs font-semibold text-[#3A2E1F]">
+                    Desconto: {cp.discount_type === 'PERCENTAGE' ? `${cp.discount_value}%` : `R$ ${cp.discount_value.toFixed(2)}`}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* TAB 6: LOGOTIPO & CONFIGURAÇÕES DA LOJA */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'settings' && storeSettings && (
+          <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-6 shadow-2xs space-y-6">
+            <div>
+              <h2 className="font-serif font-bold text-xl text-[#3A2E1F]">
+                Logotipo & Configurações da Padaria
+              </h2>
+              <p className="text-xs text-[#7E6C58]">
+                Altere a imagem circular da logo, o endereço de retirada, cidade exibida e informações gerais.
+              </p>
+            </div>
+
+            {/* SEÇÃO DO LOGOTIPO CIRCULAR */}
+            <div className="p-5 bg-[#FAF7F0] rounded-2xl border border-[#3A2E1F]/15 space-y-4">
+              <h3 className="font-serif font-bold text-base text-[#3A2E1F] flex items-center gap-2">
+                <ImageIcon className="w-5 h-5 text-[#B8623F]" />
+                <span>Logotipo da Loja (Imagem Circular)</span>
+              </h3>
+
+              <div className="flex flex-col sm:flex-row items-center gap-6">
+                {/* Visual Preview */}
+                <div className="flex flex-col items-center gap-2">
+                  <div className="w-24 h-24 rounded-full overflow-hidden border-3 border-[#B8623F]/70 p-0.5 shadow-md bg-white flex items-center justify-center">
+                    {storeSettings.logo_url ? (
+                      <img
+                        src={storeSettings.logo_url}
+                        alt="Preview Logo"
+                        className="w-full h-full rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-[#F3ECDD] rounded-full flex items-center justify-center font-serif font-bold text-4xl text-[#3A2E1F]">
+                        A
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-[11px] font-semibold text-[#7E6C58]">Visualização na Loja</span>
+                </div>
+
+                {/* Upload & Controls */}
+                <div className="flex-1 space-y-3 text-xs w-full">
+                  <input
+                    type="file"
+                    ref={logoImageInputRef}
+                    accept="image/*"
+                    onChange={handleLogoImageFileChange}
+                    className="hidden"
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => logoImageInputRef.current?.click()}
+                      className="px-4 py-2.5 bg-[#B8623F] hover:bg-[#994E30] text-white font-semibold rounded-xl flex items-center gap-2 cursor-pointer shadow-xs"
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span>Subir Imagem da Logo do Computador</span>
+                    </button>
+
+                    {storeSettings.logo_url && (
+                      <button
+                        type="button"
+                        onClick={() => setStoreSettings({ ...storeSettings, logo_url: '' })}
+                        className="px-3 py-2 border border-[#3A2E1F]/20 text-[#7E6C58] hover:text-rose-600 hover:bg-white rounded-xl cursor-pointer"
+                      >
+                        Restaurar Logo "A" Padrão
+                      </button>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#554432] mb-1">
+                      Ou informe uma URL externa da imagem:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="https://..."
+                      value={storeSettings.logo_url || ''}
+                      onChange={(e) =>
+                        setStoreSettings({ ...storeSettings, logo_url: e.target.value })
+                      }
+                      className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-white text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* SEÇÃO DE ENDEREÇO & LOCALIZAÇÃO */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div>
+                <label className="block font-semibold text-[#554432] mb-1">
+                  Cidade e Estado no Cabeçalho (Ex: Espera Feliz-MG)
+                </label>
+                <input
+                  type="text"
+                  value={storeSettings.address}
+                  onChange={(e) =>
+                    setStoreSettings({ ...storeSettings, address: e.target.value })
+                  }
+                  placeholder="Espera Feliz-MG"
+                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                />
+                <span className="text-[10px] text-[#7E6C58] mt-0.5 block">
+                  Este texto aparece na barra superior da loja para o cliente saber a base da padaria.
+                </span>
               </div>
 
-              <div className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-[#554432] mb-1">
+                  Endereço Completo para Retirada no Balcão
+                </label>
+                <input
+                  type="text"
+                  value={storeSettings.pickup_address || storeSettings.address}
+                  onChange={(e) =>
+                    setStoreSettings({ ...storeSettings, pickup_address: e.target.value })
+                  }
+                  placeholder="Rua Principal, 100 - Centro, Espera Feliz - MG"
+                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                />
+                <span className="text-[10px] text-[#7E6C58] mt-0.5 block">
+                  Exibido na confirmação de pedidos com retirada no balcão.
+                </span>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[#554432] mb-1">Nome da Padaria</label>
+                <input
+                  type="text"
+                  value={storeSettings.name}
+                  onChange={(e) =>
+                    setStoreSettings({ ...storeSettings, name: e.target.value })
+                  }
+                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[#554432] mb-1">WhatsApp para Notificações</label>
+                <input
+                  type="text"
+                  value={storeSettings.whatsapp}
+                  onChange={(e) =>
+                    setStoreSettings({ ...storeSettings, whatsapp: e.target.value })
+                  }
+                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[#554432] mb-1">Chave PIX da Padaria</label>
+                <input
+                  type="text"
+                  value={storeSettings.pix_key}
+                  onChange={(e) =>
+                    setStoreSettings({ ...storeSettings, pix_key: e.target.value })
+                  }
+                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[#554432] mb-1">Valor Mínimo de Pedido (R$)</label>
+                <input
+                  type="number"
+                  value={storeSettings.min_order_value}
+                  onChange={(e) =>
+                    setStoreSettings({ ...storeSettings, min_order_value: Number(e.target.value) })
+                  }
+                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                />
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <button
+                onClick={() => {
+                  dataStore.saveStoreSettings(storeSettings);
+                  onOrderUpdated();
+                  alert('Configurações salvas com sucesso!');
+                }}
+                className="px-6 py-2.5 bg-[#B8623F] hover:bg-[#994E30] text-white rounded-xl text-xs font-semibold cursor-pointer shadow-xs"
+              >
+                Salvar Alterações
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* TAB 7: SUPABASE & BANCO DE DADOS */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'supabase' && (
+          <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-6 shadow-2xs space-y-4">
+            <h2 className="font-serif font-bold text-xl text-[#3A2E1F] flex items-center gap-2">
+              <Database className="w-5 h-5 text-[#B8623F]" />
+              <span>Conexão Supabase & Script SQL</span>
+            </h2>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleTestSupabase}
+                disabled={supabaseTest.loading}
+                className="px-4 py-2 bg-[#3A2E1F] hover:bg-[#554432] text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${supabaseTest.loading ? 'animate-spin' : ''}`} />
+                <span>Testar Conexão Supabase</span>
+              </button>
+              <button
+                onClick={handleCopySql}
+                className="px-4 py-2 bg-[#FAF7F0] hover:bg-[#EADBBA]/60 border border-[#3A2E1F]/20 text-[#3A2E1F] rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+              >
+                {copiedSql ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedSql ? 'Copiado!' : 'Copiar Script SQL'}</span>
+              </button>
+            </div>
+            {supabaseTest.tested && (
+              <div
+                className={`p-4 rounded-xl text-xs ${
+                  supabaseTest.connected
+                    ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
+                    : 'bg-amber-50 text-amber-900 border border-amber-200'
+                }`}
+              >
+                {supabaseTest.message}
+              </div>
+            )}
+          </div>
+        )}
+      </main>
+
+      {/* ------------------------------------------------------------- */}
+      {/* MODAL 1: EDITAR / CRIAR PRODUTO (Com Upload de Fotos) */}
+      {/* ------------------------------------------------------------- */}
+      {editingProduct && (
+        <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white border border-[#3A2E1F]/15 rounded-3xl max-w-xl w-full p-6 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
+            <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
+              <h3 className="font-serif font-bold text-lg text-[#3A2E1F]">
+                {isNewProduct ? 'Cadastrar Novo Produto' : 'Editar Produto'}
+              </h3>
+              <button
+                onClick={() => setEditingProduct(null)}
+                className="p-1 rounded-full hover:bg-black/5"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              {/* UPLOAD DE FOTO DO PRODUTO */}
+              <div className="p-4 bg-[#FAF7F0] rounded-2xl border border-[#3A2E1F]/15 space-y-3">
+                <label className="block font-bold text-[#3A2E1F]">
+                  Foto do Produto
+                </label>
+                <div className="flex items-center gap-4">
+                  <div className="w-20 h-20 rounded-xl overflow-hidden bg-gray-100 border border-[#3A2E1F]/20 shrink-0">
+                    <img
+                      src={editingProduct.image_url}
+                      alt={editingProduct.name || 'Preview'}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <div className="space-y-2 flex-1">
+                    <input
+                      type="file"
+                      ref={productImageInputRef}
+                      accept="image/*"
+                      onChange={handleProductImageFileChange}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => productImageInputRef.current?.click()}
+                      className="px-3.5 py-2 bg-[#B8623F] hover:bg-[#994E30] text-white rounded-xl font-semibold flex items-center gap-2 cursor-pointer shadow-xs"
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span>Subir Foto do Computador</span>
+                    </button>
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="Ou cole a URL da imagem aqui"
+                        value={editingProduct.image_url}
+                        onChange={(e) =>
+                          setEditingProduct({ ...editingProduct, image_url: e.target.value })
+                        }
+                        className="w-full p-2 rounded-xl border border-[#3A2E1F]/20 bg-white text-[11px]"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Informações Básicas */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-[#554432] mb-1">Nome do Produto</label>
                   <input
@@ -896,84 +1586,531 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       setEditingProduct({ ...editingProduct, name: e.target.value })
                     }
                     className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20"
+                    placeholder="Ex: Pão Sourdough Tradicional"
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block font-semibold text-[#554432] mb-1">Preço Base (R$)</label>
-                    <input
-                      type="number"
-                      step="0.5"
-                      value={editingProduct.base_price}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct,
-                          base_price: Number(e.target.value),
-                        })
-                      }
-                      className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20"
-                    />
-                  </div>
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">Categoria</label>
+                  <select
+                    value={editingProduct.category_id}
+                    onChange={(e) =>
+                      setEditingProduct({ ...editingProduct, category_id: e.target.value })
+                    }
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-white"
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
-                  <div>
-                    <label className="block font-semibold text-[#554432] mb-1">Estoque</label>
-                    <input
-                      type="number"
-                      value={editingProduct.stock_quantity}
-                      onChange={(e) =>
-                        setEditingProduct({
-                          ...editingProduct,
-                          stock_quantity: Number(e.target.value),
-                        })
-                      }
-                      className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20"
-                    />
-                  </div>
+              <div>
+                <label className="block font-semibold text-[#554432] mb-1">Descrição</label>
+                <textarea
+                  rows={2}
+                  value={editingProduct.description}
+                  onChange={(e) =>
+                    setEditingProduct({ ...editingProduct, description: e.target.value })
+                  }
+                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20"
+                  placeholder="Ingredientes, tempo de fermentação, etc."
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">Preço Base (R$)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={editingProduct.base_price}
+                    onChange={(e) =>
+                      setEditingProduct({
+                        ...editingProduct,
+                        base_price: Number(e.target.value),
+                      })
+                    }
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20"
+                  />
                 </div>
 
-                <div className="flex items-center gap-3 pt-2">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={editingProduct.is_active}
-                      onChange={(e) =>
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">Preço Promo (R$)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    placeholder="Opcional"
+                    value={editingProduct.promotional_price || ''}
+                    onChange={(e) =>
+                      setEditingProduct({
+                        ...editingProduct,
+                        promotional_price: e.target.value ? Number(e.target.value) : null,
+                      })
+                    }
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">Estoque Atual</label>
+                  <input
+                    type="number"
+                    value={editingProduct.stock_quantity}
+                    onChange={(e) =>
+                      setEditingProduct({
+                        ...editingProduct,
+                        stock_quantity: Number(e.target.value),
+                      })
+                    }
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-4 pt-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editingProduct.is_active}
+                    onChange={(e) =>
+                      setEditingProduct({
+                        ...editingProduct,
+                        is_active: e.target.checked,
+                      })
+                    }
+                    className="w-4 h-4 accent-[#B8623F]"
+                  />
+                  <span className="font-semibold">Produto Ativo no Cardápio</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editingProduct.is_featured}
+                    onChange={(e) =>
+                      setEditingProduct({
+                        ...editingProduct,
+                        is_featured: e.target.checked,
+                      })
+                    }
+                    className="w-4 h-4 accent-[#B8623F]"
+                  />
+                  <span>Destaque Principal</span>
+                </label>
+              </div>
+
+              {/* Schedule Fornada Config */}
+              <div className="pt-2 border-t border-[#3A2E1F]/10 space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer font-semibold text-[#3A2E1F]">
+                  <input
+                    type="checkbox"
+                    checked={editingProduct.schedule_config?.is_scheduled_only ?? false}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      if (checked) {
                         setEditingProduct({
                           ...editingProduct,
-                          is_active: e.target.checked,
-                        })
+                          schedule_config: {
+                            is_scheduled_only: true,
+                            available_days: [2, 5],
+                            batch_limit: 10,
+                            days_label: 'Fornadas às Terças e Sextas (Lote de 10 un)',
+                          },
+                        });
+                      } else {
+                        const { schedule_config, ...rest } = editingProduct;
+                        setEditingProduct(rest as Product);
+                      }
+                    }}
+                    className="w-4 h-4 accent-[#B8623F]"
+                  />
+                  <span>Restringir a dias específicos de fornada (ex: só terça e sexta)</span>
+                </label>
+
+                {editingProduct.schedule_config?.is_scheduled_only && (
+                  <div className="p-3 bg-[#FAF7F0] rounded-xl border border-[#B7A05E]/30 space-y-2.5">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#554432] mb-1">
+                        Dias com fornada fresca:
+                      </label>
+                      <div className="grid grid-cols-4 gap-1 text-[11px]">
+                        {[
+                          { day: 0, label: 'Dom' },
+                          { day: 1, label: 'Seg' },
+                          { day: 2, label: 'Ter' },
+                          { day: 3, label: 'Qua' },
+                          { day: 4, label: 'Qui' },
+                          { day: 5, label: 'Sex' },
+                          { day: 6, label: 'Sáb' },
+                        ].map(({ day, label }) => {
+                          const isSelected =
+                            editingProduct.schedule_config?.available_days.includes(day);
+                          return (
+                            <button
+                              key={day}
+                              type="button"
+                              onClick={() => {
+                                const currentDays =
+                                  editingProduct.schedule_config?.available_days || [];
+                                const nextDays = isSelected
+                                  ? currentDays.filter((d) => d !== day)
+                                  : [...currentDays, day].sort();
+                                setEditingProduct({
+                                  ...editingProduct,
+                                  schedule_config: {
+                                    ...editingProduct.schedule_config!,
+                                    available_days: nextDays,
+                                  },
+                                });
+                              }}
+                              className={`py-1 px-1.5 rounded-lg font-bold border text-center transition-colors ${
+                                isSelected
+                                  ? 'bg-[#B8623F] text-white border-[#B8623F]'
+                                  : 'bg-white text-[#7E6C58] border-gray-200 hover:bg-gray-50'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-[#554432] mb-0.5">
+                          Limite por fornada (unidades)
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={editingProduct.schedule_config?.batch_limit || 10}
+                          onChange={(e) =>
+                            setEditingProduct({
+                              ...editingProduct,
+                              schedule_config: {
+                                ...editingProduct.schedule_config!,
+                                batch_limit: Number(e.target.value) || 1,
+                              },
+                            })
+                          }
+                          className="w-full p-1.5 rounded-lg border border-[#3A2E1F]/20 text-xs bg-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-semibold text-[#554432] mb-0.5">
+                          Rótulo da fornada
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Ex: Terças e Sextas"
+                          value={editingProduct.schedule_config?.days_label || ''}
+                          onChange={(e) =>
+                            setEditingProduct({
+                              ...editingProduct,
+                              schedule_config: {
+                                ...editingProduct.schedule_config!,
+                                days_label: e.target.value,
+                              },
+                            })
+                          }
+                          className="w-full p-1.5 rounded-lg border border-[#3A2E1F]/20 text-xs bg-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="pt-3 flex justify-end gap-2 border-t border-[#3A2E1F]/10">
+              <button
+                onClick={() => setEditingProduct(null)}
+                className="px-4 py-2 bg-gray-100 text-[#3A2E1F] rounded-xl text-xs font-semibold cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => handleSaveProduct(editingProduct)}
+                className="px-5 py-2 bg-[#B8623F] text-white rounded-xl text-xs font-semibold cursor-pointer shadow-xs"
+              >
+                Salvar Produto
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* MODAL 2: EDITAR / CRIAR CATEGORIA */}
+      {/* ------------------------------------------------------------- */}
+      {editingCategory && (
+        <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white border border-[#3A2E1F]/15 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
+              <h3 className="font-serif font-bold text-lg text-[#3A2E1F]">
+                {isNewCategory ? 'Nova Categoria' : 'Editar Categoria'}
+              </h3>
+              <button
+                onClick={() => setEditingCategory(null)}
+                className="p-1 rounded-full hover:bg-black/5"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-[#554432] mb-1">Nome da Categoria</label>
+                <input
+                  type="text"
+                  value={editingCategory.name}
+                  onChange={(e) =>
+                    setEditingCategory({
+                      ...editingCategory,
+                      name: e.target.value,
+                      slug: e.target.value.toLowerCase().replace(/\s+/g, '-'),
+                    })
+                  }
+                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20"
+                  placeholder="Ex: Pães de Fermentação Natural"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[#554432] mb-1">Descrição</label>
+                <textarea
+                  rows={2}
+                  value={editingCategory.description || ''}
+                  onChange={(e) =>
+                    setEditingCategory({ ...editingCategory, description: e.target.value })
+                  }
+                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20"
+                  placeholder="Explicação breve da categoria"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">Ordem de Exibição</label>
+                  <input
+                    type="number"
+                    value={editingCategory.sort_order}
+                    onChange={(e) =>
+                      setEditingCategory({
+                        ...editingCategory,
+                        sort_order: Number(e.target.value),
+                      })
+                    }
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20"
+                  />
+                </div>
+
+                <div className="flex items-center pt-5">
+                  <label className="flex items-center gap-2 cursor-pointer font-semibold">
+                    <input
+                      type="checkbox"
+                      checked={editingCategory.active}
+                      onChange={(e) =>
+                        setEditingCategory({ ...editingCategory, active: e.target.checked })
                       }
                       className="w-4 h-4 accent-[#B8623F]"
                     />
-                    <span>Produto Ativo no Cardápio</span>
+                    <span>Categoria Ativa</span>
                   </label>
                 </div>
+              </div>
+            </div>
+
+            <div className="pt-3 flex justify-end gap-2 border-t border-[#3A2E1F]/10">
+              <button
+                onClick={() => setEditingCategory(null)}
+                className="px-4 py-2 bg-gray-100 text-[#3A2E1F] rounded-xl text-xs font-semibold cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => handleSaveCategory(editingCategory)}
+                className="px-5 py-2 bg-[#B8623F] text-white rounded-xl text-xs font-semibold cursor-pointer shadow-xs"
+              >
+                Salvar Categoria
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* MODAL 3: ALTERAR SENHA DO SUPER ADMIN */}
+      {/* ------------------------------------------------------------- */}
+      {showChangePasswordModal && (
+        <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white border border-[#3A2E1F]/15 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
+              <div className="flex items-center gap-2">
+                <KeyRound className="w-5 h-5 text-[#B8623F]" />
+                <h3 className="font-serif font-bold text-lg text-[#3A2E1F]">
+                  Alterar Senha do Administrador
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowChangePasswordModal(false)}
+                className="p-1 rounded-full hover:bg-black/5"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-[#7E6C58]">
+              Usuário: <strong className="text-[#3A2E1F]">toledodias87@gmail.com</strong>
+            </p>
+
+            {passwordChangeStatus?.error && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{passwordChangeStatus.error}</span>
+              </div>
+            )}
+
+            {passwordChangeStatus?.success && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{passwordChangeStatus.success}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleChangePasswordSubmit} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-semibold text-[#554432] mb-1">
+                  Senha Atual (Inicial: tamiris123)
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={currentPasswordInput}
+                  onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[#554432] mb-1">Nova Senha</label>
+                <input
+                  type="password"
+                  required
+                  value={newPasswordInput}
+                  onChange={(e) => setNewPasswordInput(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20"
+                  placeholder="Mínimo 4 caracteres"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[#554432] mb-1">
+                  Confirmar Nova Senha
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={confirmPasswordInput}
+                  onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20"
+                />
               </div>
 
               <div className="pt-2 flex justify-end gap-2">
                 <button
-                  onClick={() => setEditingProduct(null)}
-                  className="px-4 py-2 bg-gray-100 text-[#3A2E1F] rounded-xl text-xs"
+                  type="button"
+                  onClick={() => setShowChangePasswordModal(false)}
+                  className="px-4 py-2 bg-gray-100 text-[#3A2E1F] rounded-xl text-xs font-semibold cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
-                  onClick={async () => {
-                    await dataStore.saveProducts(
-                      products.map((p) => (p.id === editingProduct.id ? editingProduct : p))
-                    );
-                    setProducts(await dataStore.getProducts());
-                    setEditingProduct(null);
-                  }}
-                  className="px-4 py-2 bg-[#B8623F] text-white rounded-xl text-xs font-semibold"
+                  type="submit"
+                  className="px-5 py-2 bg-[#B8623F] text-white rounded-xl text-xs font-semibold cursor-pointer shadow-xs"
                 >
-                  Salvar
+                  Atualizar Senha
                 </button>
               </div>
-            </div>
+            </form>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* MODAL 4: DETALHES DO PEDIDO & AUDITORIA */}
+      {/* ------------------------------------------------------------- */}
+      {selectedOrder && (
+        <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white border border-[#3A2E1F]/15 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-start">
+              <div>
+                <span className="text-[10px] font-bold text-[#B8623F] uppercase">Detalhes do Pedido</span>
+                <h3 className="font-serif font-bold text-xl text-[#3A2E1F]">{selectedOrder.code}</h3>
+              </div>
+              <button
+                onClick={() => setSelectedOrder(null)}
+                className="p-1.5 rounded-full hover:bg-black/5 text-[#7E6C58]"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3.5 bg-[#FAF7F0] rounded-2xl space-y-1.5 text-xs text-[#554432]">
+              <div className="flex justify-between">
+                <span>Cliente:</span>
+                <span className="font-bold text-[#3A2E1F]">{selectedOrder.customer_name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Telefone:</span>
+                <span>{selectedOrder.customer_phone}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Horário Agendado:</span>
+                <span className="font-semibold text-[#3A2E1F]">{selectedOrder.scheduled_time}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Status Atual:</span>
+                <span className="font-bold text-[#B8623F]">{selectedOrder.status}</span>
+              </div>
+            </div>
+
+            {/* Items */}
+            <div className="space-y-1.5">
+              <h4 className="font-bold text-xs text-[#3A2E1F]">Itens</h4>
+              <div className="border border-[#3A2E1F]/10 rounded-xl divide-y text-xs">
+                {selectedOrder.items.map((it) => (
+                  <div key={it.id} className="p-2.5 flex justify-between">
+                    <span>{it.quantity}x {it.product_name}</span>
+                    <span className="font-bold">R$ {it.subtotal.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Audit history */}
+            {selectedOrder.status_history && (
+              <div className="space-y-1.5">
+                <h4 className="font-bold text-xs text-[#3A2E1F]">Histórico de Auditoria</h4>
+                <div className="space-y-1 text-[11px] text-[#7E6C58]">
+                  {selectedOrder.status_history.map((h) => (
+                    <div key={h.id} className="p-2 bg-gray-50 rounded-lg flex justify-between">
+                      <span>{h.new_status} ({h.changed_by})</span>
+                      <span className="text-[10px]">{new Date(h.created_at).toLocaleTimeString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

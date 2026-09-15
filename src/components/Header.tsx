@@ -23,7 +23,7 @@ interface HeaderProps {
   onOpenOrderLookup: () => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
-  storeSettings: StoreSettings;
+  storeSettings?: StoreSettings;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -40,16 +40,26 @@ export const Header: React.FC<HeaderProps> = ({
   const [showHoursModal, setShowHoursModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  const displayCityState =
+    storeSettings?.city && storeSettings?.state
+      ? `${storeSettings.city}-${storeSettings.state}`
+      : storeSettings?.address || 'Espera Feliz-MG';
+  const pickupAddress =
+    storeSettings?.pickup_address ||
+    storeSettings?.address ||
+    'Rua Principal, 100 - Centro, Espera Feliz - MG';
+  const openingHours = storeSettings?.opening_hours || [];
+
   return (
     <>
       {/* Top utility notification bar */}
-      <header className="sticky top-0 z-40 bg-[#F3ECDD]/95 backdrop-blur-md border-b border-[#3A2E1F]/10 shadow-xs">
+      <header className="w-full bg-[#F3ECDD] border-b border-[#3A2E1F]/10 shadow-xs">
         <div className="bg-[#3A2E1F] text-[#F3ECDD] text-xs py-1.5 px-4">
           <div className="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
             <div className="flex items-center gap-2">
-              <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span className="font-medium tracking-wide">
-                Fornada do dia pronta! Entrega agendada & retirada no balcão
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
+              <span className="font-medium tracking-wide text-[11px] sm:text-xs">
+                {displayCityState}
               </span>
             </div>
             <div className="flex items-center gap-4 text-xs">
@@ -59,7 +69,7 @@ export const Header: React.FC<HeaderProps> = ({
                 className="hover:text-[#B7A05E] transition-colors flex items-center gap-1 cursor-pointer"
               >
                 <Clock className="w-3.5 h-3.5" />
-                <span>Horários & Localização</span>
+                <span>Horários & Local de Retirada</span>
               </button>
               <button
                 id="btn-rastrear-pedido-top"
@@ -79,13 +89,23 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Brand Logo & Name */}
             <div className="flex items-center gap-3">
               <a href="#" className="flex items-center gap-3 group">
-                <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#B7A05E] to-[#B8623F] p-0.5 shadow-sm flex items-center justify-center">
-                  <div className="w-full h-full bg-[#F3ECDD] rounded-[14px] flex items-center justify-center">
-                    <span className="font-serif font-bold text-2xl text-[#3A2E1F] group-hover:scale-105 transition-transform">
-                      A
-                    </span>
+                {storeSettings?.logo_url ? (
+                  <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-[#B8623F]/50 shadow-xs bg-[#FAF7F0] flex items-center justify-center shrink-0">
+                    <img
+                      src={storeSettings.logo_url}
+                      alt={storeSettings.name || 'Affeto Pães'}
+                      className="w-full h-full rounded-full object-cover group-hover:scale-105 transition-transform"
+                    />
                   </div>
-                </div>
+                ) : (
+                  <div className="w-12 h-12 rounded-full border-2 border-[#B8623F]/50 p-0.5 shadow-xs flex items-center justify-center shrink-0 bg-[#FAF7F0]">
+                    <div className="w-full h-full bg-[#F3ECDD] rounded-full flex items-center justify-center">
+                      <span className="font-serif font-bold text-2xl text-[#3A2E1F] group-hover:scale-105 transition-transform">
+                        A
+                      </span>
+                    </div>
+                  </div>
+                )}
                 <div>
                   <span className="block font-serif font-bold text-2xl tracking-tight text-[#3A2E1F]">
                     Affeto
@@ -135,16 +155,6 @@ export const Header: React.FC<HeaderProps> = ({
                     {favoritesCount}
                   </span>
                 )}
-              </button>
-
-              {/* Admin Panel Button */}
-              <button
-                id="btn-header-admin"
-                onClick={onOpenAdmin}
-                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#3A2E1F] bg-[#FFFFFF] border border-[#3A2E1F]/20 rounded-xl hover:bg-[#E6DCB8]/40 hover:border-[#3A2E1F]/40 transition-all cursor-pointer shadow-2xs"
-              >
-                <ShieldCheck className="w-4 h-4 text-[#B8623F]" />
-                <span>Painel Admin</span>
               </button>
 
               {/* Cart Button with Count Badge */}
@@ -210,16 +220,6 @@ export const Header: React.FC<HeaderProps> = ({
               <Clock className="w-4 h-4 text-[#B8623F]" />
               <span>Horários & Fornadas</span>
             </button>
-            <button
-              onClick={() => {
-                onOpenAdmin();
-                setMobileMenuOpen(false);
-              }}
-              className="w-full flex items-center gap-2.5 py-2 px-3 rounded-lg text-[#3A2E1F] hover:bg-[#E6DCB8]/50 text-left font-semibold text-[#B8623F]"
-            >
-              <ShieldCheck className="w-4 h-4" />
-              <span>Painel Administrativo da Padaria</span>
-            </button>
           </div>
         )}
       </header>
@@ -241,7 +241,7 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
               <div>
                 <h3 className="font-serif font-bold text-lg text-[#3A2E1F]">Affeto Pães Artesanais</h3>
-                <p className="text-xs text-[#7E6C58]">{storeSettings.address}</p>
+                <p className="text-xs text-[#7E6C58]">{pickupAddress}</p>
               </div>
             </div>
 
@@ -251,7 +251,7 @@ export const Header: React.FC<HeaderProps> = ({
                 Horários das Fornadas & Atendimento
               </h4>
               <div className="text-xs space-y-1.5">
-                {storeSettings.opening_hours.map((oh, i) => (
+                {openingHours.map((oh, i) => (
                   <div key={i} className="flex justify-between py-1 border-b border-black/5 last:border-0">
                     <span className="font-medium text-[#3A2E1F]">{oh.day}</span>
                     <span className="text-[#7E6C58]">

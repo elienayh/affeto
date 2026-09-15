@@ -11,13 +11,16 @@ import {
   ExternalLink,
   RefreshCw,
   Sparkles,
+  MessageCircle,
 } from 'lucide-react';
+import { getWhatsAppOrderUrl, BAKERY_WHATSAPP_NUMBER } from '../lib/whatsappSummary';
 import { paymentService } from '../services/paymentService';
-import { Order, PaymentMethod, PaymentRecord } from '../types';
+import { Order, PaymentMethod, PaymentRecord, StoreSettings } from '../types';
 
 interface PaymentScreenProps {
   order: Order;
   paymentMethod: PaymentMethod;
+  storeSettings?: StoreSettings;
   onPaymentApproved: (updatedOrder: Order) => void;
   onViewOrderTracking: (order: Order) => void;
   onBackToMenu: () => void;
@@ -26,6 +29,7 @@ interface PaymentScreenProps {
 export const PaymentScreen: React.FC<PaymentScreenProps> = ({
   order,
   paymentMethod,
+  storeSettings,
   onPaymentApproved,
   onViewOrderTracking,
   onBackToMenu,
@@ -96,6 +100,33 @@ export const PaymentScreen: React.FC<PaymentScreenProps> = ({
         </div>
 
         <div className="p-6 sm:p-8 space-y-6">
+          {/* WhatsApp Action Card */}
+          <div className="bg-emerald-50 border border-emerald-300/80 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3 text-left w-full sm:w-auto">
+              <div className="w-10 h-10 rounded-xl bg-[#25D366] text-white flex items-center justify-center shrink-0 shadow-xs">
+                <MessageCircle className="w-5 h-5 fill-current" />
+              </div>
+              <div>
+                <h4 className="font-bold text-xs sm:text-sm text-emerald-950">
+                  Resumo registrado para a padaria
+                </h4>
+                <p className="text-[11px] text-emerald-800">
+                  Envie o comprovante e os detalhes diretamente para nosso WhatsApp: <strong>+55 32 98468-0513</strong>
+                </p>
+              </div>
+            </div>
+            <a
+              id="btn-continuar-whatsapp"
+              href={getWhatsAppOrderUrl(currentOrder, storeSettings?.whatsapp || BAKERY_WHATSAPP_NUMBER)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full sm:w-auto px-5 py-2.5 bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer shrink-0"
+            >
+              <MessageCircle className="w-4 h-4 fill-current" />
+              <span>Continuar no WhatsApp</span>
+            </a>
+          </div>
+
           {/* Success screen once approved */}
           {isApproved ? (
             <div className="text-center py-6 space-y-4">
@@ -132,6 +163,16 @@ export const PaymentScreen: React.FC<PaymentScreenProps> = ({
               </div>
 
               <div className="pt-4 flex flex-col sm:flex-row gap-3 justify-center">
+                <a
+                  id="btn-whatsapp-approved"
+                  href={getWhatsAppOrderUrl(currentOrder, storeSettings?.whatsapp || BAKERY_WHATSAPP_NUMBER)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-6 py-3 bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold text-sm rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <MessageCircle className="w-4 h-4 fill-current" />
+                  <span>Continuar no WhatsApp</span>
+                </a>
                 <button
                   id="btn-acompanhar-pedido-ao-vivo"
                   onClick={() => onViewOrderTracking(currentOrder)}
