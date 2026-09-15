@@ -15,6 +15,8 @@ import {
   CheckCircle2,
   Sparkles,
   Search,
+  Layers,
+  Flame,
 } from 'lucide-react';
 import { getNextAvailableBatch } from '../lib/batchScheduler';
 import { matchDeliveryCep } from '../lib/pricingEngine';
@@ -35,6 +37,7 @@ import {
   Order,
   PaymentMethod,
   PricingBreakdown,
+  ProductionBatch,
   StoreSettings,
 } from '../types';
 
@@ -48,6 +51,7 @@ interface CheckoutModalProps {
   deliveryCepRules?: DeliveryCepRule[];
   initialCep?: string;
   orders?: Order[];
+  productionBatches?: ProductionBatch[];
   storeSettings?: StoreSettings;
   onOrderCreated: (order: Order, paymentMethod: PaymentMethod) => void;
 }
@@ -62,6 +66,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   deliveryCepRules = [],
   initialCep = '',
   orders = [],
+  productionBatches = [],
   storeSettings,
   onOrderCreated,
 }) => {
@@ -79,13 +84,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       return d.toISOString().split('T')[0];
     }
     const batchDates = scheduledItems.map((it) => {
-      const batch = getNextAvailableBatch(it.product, orders);
+      const batch = getNextAvailableBatch(it.product, orders, new Date(), it.quantity, productionBatches);
       return batch ? batch.dateString : new Date().toISOString().split('T')[0];
     });
     // Return the latest required date to satisfy all items in the basket
     batchDates.sort();
     return batchDates[batchDates.length - 1];
-  }, [scheduledItems, orders]);
+  }, [scheduledItems, orders, productionBatches]);
 
   // Form states - Phone is primary customer source
   const [customerPhone, setCustomerPhone] = useState('');
@@ -118,6 +123,39 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       setScheduledDate(recommendedDate);
     }
   }, [recommendedDate]);
+
+  // Agrupamento inteligente das entregas com base nas fornadas dos itens
+  const deliveryGroups = useMemo(() => {
+    const groupsMap = new Map<
+      string,
+      {
+        dateString: string;
+        label: string;
+        window: string;
+        items: CartItem[];
+      }
+    >();
+
+    items.forEach((it) => {
+      const targetDate = it.scheduled_batch_date || scheduledDate;
+      const targetLabel = it.scheduled_batch_label || `Data: ${targetDate}`;
+      const targetWindow = it.delivery_window || scheduledTime;
+
+      if (!groupsMap.has(targetDate)) {
+        groupsMap.set(targetDate, {
+          dateString: targetDate,
+          label: targetLabel,
+          window: targetWindow,
+          items: [],
+        });
+      }
+      groupsMap.get(targetDate)!.items.push(it);
+    });
+
+    return Array.from(groupsMap.values()).sort((a, b) =>
+      a.dateString.localeCompare(b.dateString)
+    );
+  }, [items, scheduledDate, scheduledTime]);
 
   // Look up customer by phone and auto-fill details
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -257,6 +295,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             value_id: so.value_id,
           })),
           notes: it.notes,
+          scheduled_batch_date: it.scheduled_batch_date || scheduledDate,
+          delivery_window: it.delivery_window || scheduledTime,
         })),
       };
 
@@ -408,58 +448,102 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
               )}
             </div>
 
-            {scheduledItems.length > 0 && (
-              <div className="p-3 bg-[#FAF7F0] border border-[#B7A05E]/40 rounded-xl text-xs text-[#554432] space-y-1">
-                <p className="font-bold text-[#B8623F]">
-                  📅 Atenção às Fornadas Especiais:
-                </p>
-                <ul className="list-disc list-inside space-y-0.5 text-[11px]">
-                  {scheduledItems.map((si) => (
-                    <li key={si.product.id}>
-                      <strong>{si.product.name}</strong>: {si.product.schedule_config?.days_label}
-                    </li>
-                  ))}
-                </ul>
-                <p className="text-[10px] text-[#7E6C58]">
-                  Sua entrega/retirada foi sugerida para a primeira data com fornada fresca disponível: <strong>{scheduledDate}</strong>.
-                </p>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-[#554432] mb-1">
-                  Data Desejada *
-                </label>
-                <input
-                  id="checkout-data"
-                  type="date"
-                  required
-                  value={scheduledDate}
-                  min={new Date().toISOString().split('T')[0]}
-                  onChange={(e) => setScheduledDate(e.target.value)}
-                  className="w-full text-xs p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-white text-[#3A2E1F] focus:ring-2 focus:ring-[#B8623F] focus:outline-none"
-                />
+            {/* Agrupamento de Entregas por Fornada */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-[#3A2E1F] flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5 text-[#B8623F]" />
+                  <span>Resumo do Agrupamento de Entregas</span>
+                </span>
+                <span className="text-[11px] font-semibold text-[#B8623F]">
+                  {deliveryGroups.length} {deliveryGroups.length === 1 ? 'entrega única' : 'entregas programadas'}
+                </span>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-[#554432] mb-1">
-                  Janela de Horário / Fornada *
-                </label>
-                <select
-                  id="checkout-horario"
-                  value={scheduledTime}
-                  onChange={(e) => setScheduledTime(e.target.value)}
-                  className="w-full text-xs p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-white text-[#3A2E1F] focus:ring-2 focus:ring-[#B8623F] focus:outline-none"
-                >
-                  {availableTimeSlots.map((slot, i) => (
-                    <option key={i} value={slot}>
-                      {slot}
-                    </option>
-                  ))}
-                </select>
+              {deliveryGroups.length > 1 && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">Atenção: Pedido com {deliveryGroups.length} entregas separadas!</span>
+                    <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                      Seus produtos têm dias de fornada diferentes e serão entregues em dias distintos para garantir o frescor. A taxa de entrega permanece única.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                {deliveryGroups.map((group, idx) => (
+                  <div
+                    key={group.dateString}
+                    className="p-3 bg-[#FAF7F0] border border-[#B7A05E]/30 rounded-xl space-y-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 font-bold text-xs text-[#B8623F]">
+                        <Flame className="w-3.5 h-3.5 shrink-0" />
+                        <span>ENTREGA {idx + 1} — {group.label}</span>
+                      </div>
+                      <span className="text-[11px] text-[#554432] bg-white px-2 py-0.5 rounded border border-[#3A2E1F]/10">
+                        {group.window}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1 pl-2 border-l-2 border-[#B8623F]/30">
+                      {group.items.map((it) => (
+                        <div
+                          key={it.id}
+                          className="flex items-center justify-between text-xs text-[#3A2E1F]"
+                        >
+                          <span>
+                            <strong>{it.product.name}</strong> × {it.quantity}
+                          </span>
+                          <span className="text-[#7E6C58]">
+                            R$ {it.total_item_price.toFixed(2).replace('.', ',')}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
+
+            {deliveryGroups.length <= 1 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-[#554432] mb-1">
+                    Data Desejada *
+                  </label>
+                  <input
+                    id="checkout-data"
+                    type="date"
+                    required
+                    value={scheduledDate}
+                    min={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => setScheduledDate(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-white text-[#3A2E1F] focus:ring-2 focus:ring-[#B8623F] focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#554432] mb-1">
+                    Janela de Horário / Fornada *
+                  </label>
+                  <select
+                    id="checkout-horario"
+                    value={scheduledTime}
+                    onChange={(e) => setScheduledTime(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-white text-[#3A2E1F] focus:ring-2 focus:ring-[#B8623F] focus:outline-none"
+                  >
+                    {availableTimeSlots.map((slot, i) => (
+                      <option key={i} value={slot}>
+                        {slot}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Step 3: Address (If delivery) */}

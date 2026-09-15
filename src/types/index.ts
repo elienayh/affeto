@@ -53,8 +53,51 @@ export interface ProductOption {
 export interface ProductScheduleConfig {
   is_scheduled_only: boolean;
   available_days: number[]; // 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb
-  batch_limit: number; // Capacidade por fornada (ex: 10 unidades)
+  batch_limit: number; // Capacidade máxima por fornada (ex: 10 unidades)
   days_label?: string; // Ex: 'Terças e Sextas'
+  min_lead_days?: number; // Antecedência mínima em dias (padrão: 1 dia)
+  delivery_window?: string; // Janela/horário de entrega (ex: '14:00 - 18:00')
+}
+
+export type ProductionBatchStatus = 'PLANNED' | 'IN_PRODUCTION' | 'COMPLETED' | 'CANCELLED';
+
+export interface ProductionBatch {
+  id: string;
+  product_id: string;
+  production_date: string; // YYYY-MM-DD
+  capacity: number;
+  reserved_quantity: number;
+  status: ProductionBatchStatus;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type OrderDeliveryStatus =
+  | 'PENDING'
+  | 'PREPARING'
+  | 'READY'
+  | 'OUT_FOR_DELIVERY'
+  | 'DELIVERED'
+  | 'CANCELLED';
+
+export interface OrderDeliveryItem {
+  id: string;
+  delivery_id: string;
+  order_item_id: string;
+  product_id?: string;
+  product_name?: string;
+  quantity: number;
+}
+
+export interface OrderDelivery {
+  id: string;
+  order_id: string;
+  delivery_date: string; // YYYY-MM-DD
+  delivery_time: string; // ex: '14:00 - 18:00'
+  delivery_status: OrderDeliveryStatus;
+  delivery_fee: number;
+  items?: OrderDeliveryItem[];
 }
 
 export interface Product {
@@ -96,6 +139,10 @@ export interface CartItem {
   selected_options: CartItemOptionSelection[];
   notes?: string;
   total_item_price: number;
+  // Suporte à fornada específica selecionada
+  scheduled_batch_date?: string; // YYYY-MM-DD
+  scheduled_batch_label?: string; // Ex: "Sexta-feira, 18/09"
+  delivery_window?: string; // Ex: "14:00 - 18:00"
 }
 
 export interface CustomerAddress {
@@ -217,6 +264,7 @@ export interface Order {
   notes?: string;
   payment_method?: PaymentMethod;
   payment?: PaymentRecord;
+  deliveries?: OrderDelivery[];
   status_history: OrderStatusHistoryItem[];
   created_at: string;
   updated_at: string;
@@ -226,6 +274,7 @@ export interface StoreSettings {
   id: string;
   name: string;
   slug: string;
+  description?: string;
   address: string;
   city?: string;
   state?: string;
@@ -244,6 +293,8 @@ export interface StoreSettings {
     is_closed: boolean;
   }[];
   lead_time_minutes: number;
+  instagram?: string;
+  fresh_batch_hours?: string;
 }
 
 // Future Stubs Types (Section 4 of prompt)

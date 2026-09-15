@@ -382,7 +382,10 @@ export const pricingEngine = {
     product: Product,
     quantity: number,
     selectedOptions: CartItemOptionSelection[] = [],
-    notes = ''
+    notes = '',
+    scheduledBatchDate?: string,
+    scheduledBatchLabel?: string,
+    deliveryWindow?: string
   ): CartItem => {
     let unitPrice =
       product.promotional_price && product.promotional_price > 0
@@ -397,7 +400,8 @@ export const pricingEngine = {
 
     // Generate a deterministic or pseudo-unique cart item id
     const optionsHash = selectedOptions.map((o) => `${o.option_id}:${o.value_id}`).join('|');
-    const id = `cart-${product.id}-${optionsHash || 'standard'}-${Date.now()}`;
+    const batchKey = scheduledBatchDate || 'standard';
+    const id = `cart-${product.id}-${optionsHash || 'base'}-${batchKey}-${Date.now()}`;
 
     return {
       id,
@@ -408,6 +412,9 @@ export const pricingEngine = {
       unit_price: unitPrice,
       total_item_price: totalItemPrice,
       notes,
+      scheduled_batch_date: scheduledBatchDate,
+      scheduled_batch_label: scheduledBatchLabel,
+      delivery_window: deliveryWindow,
     };
   },
 

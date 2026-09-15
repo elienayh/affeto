@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   X,
   ShoppingBag,
@@ -13,6 +13,8 @@ import {
   AlertCircle,
   MapPin,
   HelpCircle,
+  Calendar,
+  Flame,
 } from 'lucide-react';
 import { matchDeliveryCep } from '../lib/pricingEngine';
 import { CartItem, Coupon, DeliveryCepRule, DeliveryType, DeliveryZone, PricingBreakdown } from '../types';
@@ -62,6 +64,17 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 }) => {
   const [showCepListModal, setShowCepListModal] = useState(false);
   if (!isOpen) return null;
+
+  // Distinct delivery dates in cart for batch products
+  const distinctDeliveryDates = useMemo(() => {
+    const dates = new Set<string>();
+    items.forEach((it) => {
+      if (it.scheduled_batch_label) {
+        dates.add(it.scheduled_batch_label);
+      }
+    });
+    return Array.from(dates);
+  }, [items]);
 
   const matchedCep = inputCep ? matchDeliveryCep(inputCep, deliveryCepRules) : null;
   const isCepValid = !!matchedCep;
@@ -156,6 +169,19 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                       </p>
                     )}
 
+                    {/* Batch delivery badge */}
+                    {item.scheduled_batch_label && (
+                      <div className="mt-1.5 p-1.5 rounded-lg bg-[#FAF5EB] border border-[#B7A05E]/30 text-[11px] text-[#554432] flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-[#B8623F] shrink-0" />
+                          <span>Entrega: <strong>{item.scheduled_batch_label}</strong></span>
+                        </div>
+                        {item.delivery_window && (
+                          <span className="text-[10px] text-[#7E6C58]">({item.delivery_window})</span>
+                        )}
+                      </div>
+                    )}
+
                     {/* Price and quantity controls */}
                     <div className="mt-2.5 flex items-center justify-between">
                       <span className="font-serif font-bold text-sm text-[#3A2E1F]">
@@ -184,6 +210,20 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 </div>
               ))}
             </div>
+
+            {/* Multi-batch order notice */}
+            {distinctDeliveryDates.length > 1 && (
+              <div className="mx-4 my-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold">Atenção: Pedido com {distinctDeliveryDates.length} entregas distintas:</span>
+                  <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                    Seus itens possuem fornadas em dias diferentes ({distinctDeliveryDates.join(' e ')}). 
+                    A taxa de entrega é única para todo o pedido.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Delivery Option Toggle */}
             <div className="p-4 bg-[#FAF7F0] border-t border-[#3A2E1F]/10 space-y-3">

@@ -21,6 +21,8 @@ import { catalogService } from './services/catalogService';
 import { orderService } from './services/orderService';
 import { pricingEngine } from './lib/pricingEngine';
 import { dataStore } from './lib/supabase';
+import { INITIAL_STORE_SETTINGS } from './data/mockData';
+import { getNextAvailableBatch } from './lib/batchScheduler';
 import {
   CartItem,
   CartItemOptionSelection,
@@ -32,6 +34,7 @@ import {
   Order,
   PaymentMethod,
   PricingBreakdown,
+  ProductionBatch,
   Product,
   StoreSettings,
 } from './types';
@@ -63,18 +66,8 @@ export default function App() {
   const [deliveryCepRules, setDeliveryCepRules] = useState<DeliveryCepRule[]>([]);
   const [customerCep, setCustomerCep] = useState<string>('');
 
-  // Store & delivery settings
-  const [storeSettings, setStoreSettings] = useState<StoreSettings>({
-    name: 'Affeto Pães Artesanais',
-    pix_key: 'contato@affetopaes.com.br',
-    whatsapp: '5511987654321',
-    address: 'Alameda Lorena, 1420 - Jardins, São Paulo - SP',
-    opening_time: '07:30',
-    closing_time: '19:30',
-    lead_time_minutes: 45,
-    min_order_value: 20.0,
-    free_shipping_threshold: 120.0,
-  });
+  // Store & delivery settings (Unificada com dados editáveis)
+  const [storeSettings, setStoreSettings] = useState<StoreSettings>(INITIAL_STORE_SETTINGS);
   const [deliveryZones, setDeliveryZones] = useState<DeliveryZone[]>([]);
   const [selectedZoneId, setSelectedZoneId] = useState<string>('zone-1');
   const [coupons, setCoupons] = useState<Coupon[]>([]);
@@ -140,6 +133,7 @@ export default function App() {
 
   // All store orders for admin and live updates
   const [allOrders, setAllOrders] = useState<Order[]>([]);
+  const [productionBatches, setProductionBatches] = useState<ProductionBatch[]>([]);
 
   // Toast message
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -155,7 +149,7 @@ export default function App() {
   const loadInitialData = async () => {
     setLoadingCatalog(true);
     try {
-      const [prods, cats, zones, cps, sets, ords, cepRules] = await Promise.all([
+      const [prods, cats, zones, cps, sets, ords, cepRules, batches] = await Promise.all([
         catalogService.getProducts(),
         catalogService.getCategories(),
         dataStore.getDeliveryZones(),
@@ -163,6 +157,7 @@ export default function App() {
         dataStore.getStoreSettings(),
         dataStore.getOrders(),
         dataStore.getDeliveryCeps(),
+        dataStore.getProductionBatches(),
       ]);
 
       setProducts(prods);
@@ -173,6 +168,7 @@ export default function App() {
       setStoreSettings(sets);
       setAllOrders(ords);
       setDeliveryCepRules(cepRules);
+      setProductionBatches(batches);
 
       // Check URL for order tracking param
       const urlParams = new URLSearchParams(window.location.search);
@@ -245,17 +241,43 @@ export default function App() {
     product: Product,
     quantity: number,
     selectedOptions: CartItemOptionSelection[],
-    notes: string
+    notes: string,
+    scheduledBatchDate?: string,
+    scheduledBatchLabel?: string,
+    deliveryWindow?: string
   ) => {
-    const newItem = pricingEngine.createCartItem(product, quantity, selectedOptions, notes);
+    let targetBatchDate = scheduledBatchDate;
+    let targetBatchLabel = scheduledBatchLabel;
+    let targetDeliveryWindow = deliveryWindow;
+
+    // Se o produto for de fornada programada e nenhuma data foi enviada explicitamente, calcula a próxima fornada disponível
+    if (product.schedule_config?.is_scheduled_only && !targetBatchDate) {
+      const autoBatch = getNextAvailableBatch(product, allOrders, new Date(), quantity, productionBatches);
+      if (autoBatch) {
+        targetBatchDate = autoBatch.dateString;
+        targetBatchLabel = autoBatch.formattedDate;
+        targetDeliveryWindow = autoBatch.deliveryWindow;
+      }
+    }
+
+    const newItem = pricingEngine.createCartItem(
+      product,
+      quantity,
+      selectedOptions,
+      notes,
+      targetBatchDate,
+      targetBatchLabel,
+      targetDeliveryWindow
+    );
 
     setCartItems((prev) => {
-      // Check if identical item already exists (same product and same options)
+      // Regra da Padaria Affeto: Uma mesma linha de produto deve ficar integralmente em uma única fornada
       const existingIdx = prev.findIndex(
         (it) =>
           it.product.id === product.id &&
           JSON.stringify(it.selected_options) === JSON.stringify(selectedOptions) &&
-          it.notes === notes
+          it.notes === notes &&
+          it.scheduled_batch_date === targetBatchDate
       );
 
       if (existingIdx >= 0) {
@@ -265,7 +287,10 @@ export default function App() {
           product,
           updatedQty,
           selectedOptions,
-          notes
+          notes,
+          targetBatchDate,
+          targetBatchLabel,
+          targetDeliveryWindow
         );
         return updated;
       }
@@ -280,7 +305,20 @@ export default function App() {
     if (product.options && product.options.length > 0) {
       setSelectedProduct(product);
     } else {
-      handleAddToCart(product, 1, [], '');
+      let batchDate: string | undefined;
+      let batchLabel: string | undefined;
+      let deliveryWin: string | undefined;
+
+      if (product.schedule_config?.is_scheduled_only) {
+        const auto = getNextAvailableBatch(product, allOrders, new Date(), 1, productionBatches);
+        if (auto) {
+          batchDate = auto.dateString;
+          batchLabel = auto.formattedDate;
+          deliveryWin = auto.deliveryWindow;
+        }
+      }
+
+      handleAddToCart(product, 1, [], '', batchDate, batchLabel, deliveryWin);
     }
   };
 
@@ -297,7 +335,10 @@ export default function App() {
             it.product,
             newQty,
             it.selected_options,
-            it.notes
+            it.notes,
+            it.scheduled_batch_date,
+            it.scheduled_batch_label,
+            it.delivery_window
           );
         }
         return it;
@@ -338,8 +379,9 @@ export default function App() {
     setIsCheckoutOpen(false);
     setIsCartOpen(false);
 
-    // Refresh orders
+    // Refresh orders and production batches
     dataStore.getOrders().then((ords) => setAllOrders(ords));
+    dataStore.getProductionBatches().then((batches) => setProductionBatches(batches));
 
     // Show Payment Screen
     setActivePaymentOrder({ order, method: paymentMethod });
@@ -347,6 +389,7 @@ export default function App() {
 
   const handlePaymentApproved = (updatedOrder: Order) => {
     dataStore.getOrders().then((ords) => setAllOrders(ords));
+    dataStore.getProductionBatches().then((batches) => setProductionBatches(batches));
     showToast(`Pagamento do pedido ${updatedOrder.code} aprovado com sucesso!`);
   };
 
@@ -402,6 +445,11 @@ export default function App() {
             window.history.pushState(null, '', '/');
           }
         }}
+        onLogout={() => {
+          setIsAdminOpen(false);
+          window.history.pushState(null, '', '/');
+          showToast('Sessão administrativa finalizada com sucesso.');
+        }}
         orders={allOrders}
         onOrderUpdated={() => {
           dataStore.getOrders().then(setAllOrders);
@@ -409,6 +457,7 @@ export default function App() {
           catalogService.getProducts().then(setProducts);
           catalogService.getCategories().then(setCategories);
           dataStore.getStoreSettings().then(setStoreSettings);
+          dataStore.getProductionBatches().then(setProductionBatches);
         }}
       />
     );
@@ -481,6 +530,7 @@ export default function App() {
                 <FeaturedItemBanner
                   product={featured}
                   orders={allOrders}
+                  productionBatches={productionBatches}
                   onSelectProduct={setSelectedProduct}
                   onQuickAdd={handleQuickAdd}
                   isInCart={cartItems.some((it) => it.product.id === featured.id)}
@@ -522,6 +572,7 @@ export default function App() {
                           key={product.id}
                           product={product}
                           orders={allOrders}
+                          productionBatches={productionBatches}
                           isFavorite={favoriteIds.includes(product.id)}
                           onToggleFavorite={handleToggleFavorite}
                           onSelectProduct={setSelectedProduct}
@@ -569,6 +620,7 @@ export default function App() {
                               key={product.id}
                               product={product}
                               orders={allOrders}
+                              productionBatches={productionBatches}
                               isFavorite={favoriteIds.includes(product.id)}
                               onToggleFavorite={handleToggleFavorite}
                               onSelectProduct={setSelectedProduct}
@@ -592,16 +644,32 @@ export default function App() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             {/* Column 1: Brand & Craft */}
             <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-[#B8623F] text-white flex items-center justify-center font-serif font-bold text-lg">
-                  A
+              <div className="flex items-center gap-3">
+                {storeSettings.logo_url ? (
+                  <div className="w-10 h-10 rounded-xl overflow-hidden border border-[#B8623F]/40 p-0.5 bg-white shrink-0 shadow-xs">
+                    <img
+                      src={storeSettings.logo_url}
+                      alt={storeSettings.name}
+                      className="w-full h-full rounded-lg object-cover"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-9 h-9 rounded-xl bg-[#B8623F] text-white flex items-center justify-center font-serif font-bold text-lg shrink-0">
+                    {storeSettings.name ? storeSettings.name.charAt(0).toUpperCase() : 'A'}
+                  </div>
+                )}
+                <div>
+                  <span className="block font-serif font-bold text-xl tracking-tight text-[#FAF7F0]">
+                    {storeSettings.name}
+                  </span>
+                  <span className="block text-[10px] text-[#A99885] tracking-wider uppercase font-medium">
+                    {storeSettings.city ? `${storeSettings.city} - ${storeSettings.state || 'MG'}` : 'Padaria Artesanal'}
+                  </span>
                 </div>
-                <span className="font-serif font-bold text-xl tracking-tight text-[#FAF7F0]">
-                  Affeto
-                </span>
               </div>
               <p className="text-xs text-[#A99885] leading-relaxed">
-                Pães e folhados de fermentação lenta com levain de 36 horas, farinhas francesas selecionadas e respeito ao tempo do trigo.
+                {storeSettings.description ||
+                  'Pães e folhados de fermentação lenta com levain de 36 horas, farinhas francesas selecionadas e respeito ao tempo do trigo.'}
               </p>
             </div>
 
@@ -610,30 +678,78 @@ export default function App() {
               <h4 className="font-serif font-bold text-sm text-[#EADBBA]">
                 Horários da Fornada
               </h4>
-              <p className="text-[#A99885]">
-                <strong className="text-white">Segunda a Sábado:</strong> 07h30 às 19h30
-              </p>
-              <p className="text-[#A99885]">
-                <strong className="text-white">Domingos e Feriados:</strong> 08h00 às 14h00
-              </p>
-              <p className="text-[#B7A05E] pt-1">
-                Fornada fresca saindo às 08h00 e às 15h00.
+              {storeSettings.opening_hours && storeSettings.opening_hours.length > 0 ? (
+                <div className="space-y-1.5 text-[#A99885]">
+                  {storeSettings.opening_hours.map((oh, idx) => (
+                    <p key={idx} className="flex items-center justify-between text-[11px]">
+                      <span className="text-white/80">{oh.day}:</span>
+                      <span className={oh.is_closed ? 'text-rose-400 font-medium' : 'text-[#FAF7F0] font-medium'}>
+                        {oh.is_closed ? 'Fechado' : `${oh.open} às ${oh.close}`}
+                      </span>
+                    </p>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <p className="text-[#A99885]">
+                    <strong className="text-white">Segunda a Sábado:</strong> 07h30 às 19h30
+                  </p>
+                  <p className="text-[#A99885]">
+                    <strong className="text-white">Domingos e Feriados:</strong> 08h00 às 14h00
+                  </p>
+                </>
+              )}
+              <p className="text-[#B7A05E] pt-2 font-medium text-[11px]">
+                {storeSettings.fresh_batch_hours || 'Fornada fresca saindo às 08h00 e às 15h00.'}
               </p>
             </div>
 
             {/* Column 3: Location & Contact */}
-            <div className="space-y-2 text-xs">
+            <div className="space-y-2.5 text-xs">
               <h4 className="font-serif font-bold text-sm text-[#EADBBA]">
                 Endereço & Atendimento
               </h4>
               <div className="flex items-start gap-2 text-[#A99885]">
                 <MapPin className="w-4 h-4 text-[#B8623F] shrink-0 mt-0.5" />
-                <span>{storeSettings.address}</span>
+                <span className="leading-snug">{storeSettings.pickup_address || storeSettings.address}</span>
               </div>
-              <div className="flex items-center gap-2 text-[#A99885]">
-                <Phone className="w-4 h-4 text-[#B8623F] shrink-0" />
-                <span>WhatsApp: (11) 98765-4321</span>
-              </div>
+              {storeSettings.phone && (
+                <div className="flex items-center gap-2 text-[#A99885]">
+                  <Phone className="w-4 h-4 text-[#B8623F] shrink-0" />
+                  <a
+                    href={`tel:${storeSettings.phone.replace(/\D/g, '')}`}
+                    className="hover:text-white transition-colors"
+                  >
+                    {storeSettings.phone}
+                  </a>
+                </div>
+              )}
+              {storeSettings.whatsapp && (
+                <div className="flex items-center gap-2 text-[#A99885]">
+                  <span className="w-4 h-4 text-emerald-400 font-bold text-xs flex items-center justify-center">💬</span>
+                  <a
+                    href={`https://wa.me/${storeSettings.whatsapp.replace(/\D/g, '')}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="hover:text-white underline underline-offset-2 transition-colors"
+                  >
+                    WhatsApp: {storeSettings.whatsapp}
+                  </a>
+                </div>
+              )}
+              {storeSettings.instagram && (
+                <div className="flex items-center gap-2 text-[#A99885]">
+                  <Instagram className="w-4 h-4 text-[#B8623F] shrink-0" />
+                  <a
+                    href={`https://instagram.com/${storeSettings.instagram.replace('@', '')}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="hover:text-white transition-colors"
+                  >
+                    {storeSettings.instagram}
+                  </a>
+                </div>
+              )}
             </div>
 
             {/* Column 4: Quick Links & Management */}
@@ -658,8 +774,26 @@ export default function App() {
           </div>
 
           <div className="mt-10 pt-6 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between text-xs text-[#7E6C58]">
-            <p>© {new Date().getFullYear()} Affeto Pães Artesanais. Feito com afeto e farinha pura.</p>
-            <p className="mt-2 sm:mt-0">Pronto para deploy na Vercel & Supabase.</p>
+            <p>© {new Date().getFullYear()} {storeSettings.name}. Feito com afeto e farinha pura.</p>
+            
+            <div className="flex items-center gap-4 mt-3 sm:mt-0">
+              <span className="text-[11px] text-[#554432] hidden sm:inline">Affeto Delivery & Balcão</span>
+              {/* Botão discreto no rodapé levando para a página admin (/admin) */}
+              <a
+                id="btn-footer-admin-link"
+                href="/admin"
+                onClick={(e) => {
+                  e.preventDefault();
+                  window.history.pushState(null, '', '/admin');
+                  setIsAdminOpen(true);
+                }}
+                className="text-[#7E6C58] hover:text-[#EADBBA] transition-colors flex items-center gap-1.5 opacity-60 hover:opacity-100 cursor-pointer"
+                title="Acesso Administrativo ao Sistema"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Painel Admin</span>
+              </a>
+            </div>
           </div>
         </div>
       </footer>
@@ -669,6 +803,8 @@ export default function App() {
       {/* 1. Product Customization & Details Modal */}
       <ProductModal
         product={selectedProduct}
+        orders={allOrders}
+        productionBatches={productionBatches}
         onClose={() => setSelectedProduct(null)}
         isFavorite={selectedProduct ? favoriteIds.includes(selectedProduct.id) : false}
         onToggleFavorite={handleToggleFavorite}
@@ -712,6 +848,7 @@ export default function App() {
         deliveryCepRules={deliveryCepRules}
         initialCep={customerCep}
         orders={allOrders}
+        productionBatches={productionBatches}
         storeSettings={storeSettings}
         onOrderCreated={handleOrderCreated}
       />

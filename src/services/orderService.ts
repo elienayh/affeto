@@ -4,6 +4,8 @@ import {
   CustomerAddress,
   DeliveryType,
   Order,
+  OrderDelivery,
+  OrderDeliveryItem,
   OrderItem,
   OrderStatus,
   PaymentMethod,
@@ -29,6 +31,8 @@ export interface CreateOrderInput {
       value_id: string;
     }>;
     notes?: string;
+    scheduled_batch_date?: string; // Data específica da fornada (YYYY-MM-DD)
+    delivery_window?: string; // Ex: '14:00 - 18:00'
   }>;
   payment_method: PaymentMethod;
 }
@@ -40,20 +44,57 @@ export const orderService = {
     const coupons = await dataStore.getCoupons();
     const zones = await dataStore.getDeliveryZones();
 
-    // 2. Validate Stock (Section 5.2 - Concurrency & Stock Check)
+    // 2. Validate Stock & Batch Capacity (Atomic Reservation Protection)
+    const reservedBatches: Array<{ productId: string; date: string; quantity: number }> = [];
+
     for (const it of input.items) {
       const prod = products.find((p) => p.id === it.product_id);
       if (!prod) {
         return { error: `Produto não encontrado: ${it.product_id}` };
       }
-      if (prod.track_stock && prod.stock_quantity < it.quantity) {
-        return {
-          error: `Estoque insuficiente para "${prod.name}". Disponível: ${prod.stock_quantity} unidades.`,
-        };
+
+      // Validação de estoque tradicional (produtos com estoque físico)
+      if (prod.track_stock && (!prod.schedule_config || !prod.schedule_config.is_scheduled_only)) {
+        if (prod.stock_quantity < it.quantity) {
+          return {
+            error: `Estoque insuficiente para "${prod.name}". Disponível: ${prod.stock_quantity} unidades.`,
+          };
+        }
+      }
+
+      // Validação atômica de capacidade por fornada (produto + data)
+      if (prod.schedule_config && prod.schedule_config.is_scheduled_only) {
+        const targetDate = it.scheduled_batch_date || input.scheduled_date;
+        const defaultCap = prod.schedule_config.batch_limit || 10;
+
+        const reserveRes = await dataStore.reserveBatchCapacity(
+          prod.id,
+          targetDate,
+          it.quantity,
+          defaultCap
+        );
+
+        if (!reserveRes.success) {
+          // Rollback das reservas já feitas nesta transação
+          for (const rb of reservedBatches) {
+            await dataStore.releaseBatchCapacity(rb.productId, rb.date, rb.quantity);
+          }
+          return {
+            error:
+              reserveRes.error ||
+              `A fornada de ${targetDate} para "${prod.name}" atingiu a capacidade máxima e não comporta ${it.quantity} unidades. Por favor, escolha a próxima data disponível.`,
+          };
+        }
+
+        reservedBatches.push({
+          productId: prod.id,
+          date: targetDate,
+          quantity: it.quantity,
+        });
       }
     }
 
-    // 3. Pricing Engine recalculation (Section 5.1 - Single Source of Truth)
+    // 3. Pricing Engine recalculation (Single Source of Truth)
     const pricingResult = calculateOrderPricing({
       items: input.items,
       availableProducts: products,
@@ -65,14 +106,18 @@ export const orderService = {
     });
 
     if (pricingResult.error) {
+      // Rollback das reservas se cálculo falhar
+      for (const rb of reservedBatches) {
+        await dataStore.releaseBatchCapacity(rb.productId, rb.date, rb.quantity);
+      }
       return { error: pricingResult.error };
     }
 
     const { breakdown, validatedItems } = pricingResult;
 
-    // 4. Reserve stock / decrement quantity
+    // 4. Reserve stock / decrement quantity for tracked non-batch products
     for (const vi of validatedItems) {
-      if (vi.product.track_stock) {
+      if (vi.product.track_stock && (!vi.product.schedule_config || !vi.product.schedule_config.is_scheduled_only)) {
         vi.product.stock_quantity = Math.max(0, vi.product.stock_quantity - vi.quantity);
       }
     }
@@ -110,6 +155,70 @@ export const orderService = {
       })),
     }));
 
+    // 6. Group items by delivery date (Multi-delivery support)
+    // Se vários produtos tiverem a mesma data, são agrupados em uma única entrega!
+    const deliveryMap = new Map<
+      string,
+      {
+        date: string;
+        time: string;
+        items: Array<{ orderItemId: string; productId: string; productName: string; quantity: number }>;
+      }
+    >();
+
+    validatedItems.forEach((vi, idx) => {
+      const orderItem = orderItems[idx];
+      const rawItem = input.items[idx];
+      const deliveryDate = rawItem?.scheduled_batch_date || input.scheduled_date;
+      const deliveryTime =
+        rawItem?.delivery_window ||
+        vi.product.schedule_config?.delivery_window ||
+        input.scheduled_time ||
+        '14:00 - 18:00';
+
+      if (!deliveryMap.has(deliveryDate)) {
+        deliveryMap.set(deliveryDate, {
+          date: deliveryDate,
+          time: deliveryTime,
+          items: [],
+        });
+      }
+
+      deliveryMap.get(deliveryDate)!.items.push({
+        orderItemId: orderItem.id,
+        productId: vi.product.id,
+        productName: vi.product.name,
+        quantity: vi.quantity,
+      });
+    });
+
+    // Ordenar entregas cronologicamente
+    const sortedDates = Array.from(deliveryMap.keys()).sort();
+    const orderDeliveries: OrderDelivery[] = sortedDates.map((dateKey, index) => {
+      const group = deliveryMap.get(dateKey)!;
+      const deliveryId = `deliv-${orderId}-${index + 1}`;
+
+      const deliveryItems: OrderDeliveryItem[] = group.items.map((it, itIdx) => ({
+        id: `deliv-it-${deliveryId}-${itIdx + 1}`,
+        delivery_id: deliveryId,
+        order_item_id: it.orderItemId,
+        product_id: it.productId,
+        product_name: it.productName,
+        quantity: it.quantity,
+      }));
+
+      return {
+        id: deliveryId,
+        order_id: orderId,
+        delivery_date: group.date,
+        delivery_time: group.time,
+        delivery_status: 'PENDING',
+        // Preserva a taxa comercial: atribuída à primeira entrega
+        delivery_fee: index === 0 ? breakdown.delivery_fee : 0,
+        items: deliveryItems,
+      };
+    });
+
     const nowIso = new Date().toISOString();
 
     const newOrder: Order = {
@@ -121,10 +230,11 @@ export const orderService = {
       status: 'PENDING_PAYMENT',
       payment_status: 'PENDING',
       delivery_type: input.delivery_type,
-      scheduled_date: input.scheduled_date,
-      scheduled_time: input.scheduled_time,
+      scheduled_date: sortedDates[0] || input.scheduled_date,
+      scheduled_time: orderDeliveries[0]?.delivery_time || input.scheduled_time,
       address: input.delivery_type === 'DELIVERY' ? input.address : undefined,
       items: orderItems,
+      deliveries: orderDeliveries,
       subtotal: breakdown.subtotal,
       discount: breakdown.discount,
       delivery_fee: breakdown.delivery_fee,
@@ -138,7 +248,7 @@ export const orderService = {
           previous_status: null,
           new_status: 'PENDING_PAYMENT',
           changed_by: 'CUSTOMER_CHECKOUT',
-          notes: 'Pedido gerado, aguardando confirmação do pagamento via Mercado Pago',
+          notes: 'Pedido gerado com agendamento de fornadas, aguardando pagamento',
           created_at: nowIso,
         },
       ],

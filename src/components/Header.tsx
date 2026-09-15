@@ -101,17 +101,17 @@ export const Header: React.FC<HeaderProps> = ({
                   <div className="w-12 h-12 rounded-full border-2 border-[#B8623F]/50 p-0.5 shadow-xs flex items-center justify-center shrink-0 bg-[#FAF7F0]">
                     <div className="w-full h-full bg-[#F3ECDD] rounded-full flex items-center justify-center">
                       <span className="font-serif font-bold text-2xl text-[#3A2E1F] group-hover:scale-105 transition-transform">
-                        A
+                        {storeSettings?.name ? storeSettings.name.charAt(0).toUpperCase() : 'A'}
                       </span>
                     </div>
                   </div>
                 )}
                 <div>
                   <span className="block font-serif font-bold text-2xl tracking-tight text-[#3A2E1F]">
-                    Affeto
+                    {storeSettings?.name || 'Affeto'}
                   </span>
                   <span className="block text-[11px] uppercase tracking-widest text-[#7E6C58] font-semibold -mt-1">
-                    Pães Artesanais
+                    {storeSettings?.city ? `${storeSettings.city} - ${storeSettings.state || 'MG'}` : 'Pães Artesanais'}
                   </span>
                 </div>
               </a>
@@ -240,7 +240,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <MapPin className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-serif font-bold text-lg text-[#3A2E1F]">Affeto Pães Artesanais</h3>
+                <h3 className="font-serif font-bold text-lg text-[#3A2E1F]">{storeSettings?.name || 'Affeto Pães Artesanais'}</h3>
                 <p className="text-xs text-[#7E6C58]">{pickupAddress}</p>
               </div>
             </div>

@@ -26,7 +26,10 @@ import {
   Upload,
   Image as ImageIcon,
   Layers,
+  LogOut,
+  Phone,
 } from 'lucide-react';
+import { adminAuth } from '../lib/adminAuth';
 import { SUPABASE_FULL_SCHEMA_SQL } from '../lib/schemaSql';
 import { dataStore } from '../lib/supabase';
 import { orderService } from '../services/orderService';
@@ -44,6 +47,7 @@ import {
 interface AdminPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  onLogout?: () => void;
   orders: Order[];
   onOrderUpdated: () => void;
 }
@@ -51,6 +55,7 @@ interface AdminPanelProps {
 export const AdminPanel: React.FC<AdminPanelProps> = ({
   isOpen,
   onClose,
+  onLogout,
   orders,
   onOrderUpdated,
 }) => {
@@ -108,6 +113,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // Logo file upload ref
   const logoImageInputRef = useRef<HTMLInputElement>(null);
+  const [settingsSavedMessage, setSettingsSavedMessage] = useState<string | null>(null);
 
   // Load Data
   const reloadData = async () => {
@@ -343,11 +349,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <button
                 id="btn-admin-ver-loja"
                 onClick={onClose}
-                className="px-3.5 py-2 rounded-xl bg-[#B8623F] hover:bg-[#994E30] text-white transition-colors flex items-center gap-1.5 font-semibold cursor-pointer shadow-xs"
+                className="px-3.5 py-2 rounded-xl bg-[#FAF7F0] hover:bg-[#F3ECDD] text-[#3A2E1F] border border-[#3A2E1F]/20 transition-colors flex items-center gap-1.5 font-semibold cursor-pointer shadow-2xs"
                 title="Voltar para o cardápio da loja"
               >
-                <Store className="w-4 h-4" />
+                <Store className="w-4 h-4 text-[#B8623F]" />
                 <span>Voltar à Loja</span>
+              </button>
+
+              {/* Logout Button */}
+              <button
+                id="btn-admin-logout"
+                onClick={() => {
+                  adminAuth.logout();
+                  if (onLogout) {
+                    onLogout();
+                  } else {
+                    onClose();
+                  }
+                }}
+                className="px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-colors flex items-center gap-1.5 font-semibold cursor-pointer shadow-2xs"
+                title="Sair do painel administrativo"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Sair</span>
               </button>
             </div>
           </div>
@@ -1159,104 +1183,341 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
             </div>
 
-            {/* SEÇÃO DE ENDEREÇO & LOCALIZAÇÃO */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-              <div>
-                <label className="block font-semibold text-[#554432] mb-1">
-                  Cidade e Estado no Cabeçalho (Ex: Espera Feliz-MG)
-                </label>
-                <input
-                  type="text"
-                  value={storeSettings.address}
-                  onChange={(e) =>
-                    setStoreSettings({ ...storeSettings, address: e.target.value })
-                  }
-                  placeholder="Espera Feliz-MG"
-                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
-                />
-                <span className="text-[10px] text-[#7E6C58] mt-0.5 block">
-                  Este texto aparece na barra superior da loja para o cliente saber a base da padaria.
-                </span>
+            {/* MENSAGEM DE CONFIRMAÇÃO AO SALVAR */}
+            {settingsSavedMessage && (
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2 animate-fadeIn">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <span>{settingsSavedMessage}</span>
               </div>
+            )}
 
-              <div>
-                <label className="block font-semibold text-[#554432] mb-1">
-                  Endereço Completo para Retirada no Balcão
-                </label>
-                <input
-                  type="text"
-                  value={storeSettings.pickup_address || storeSettings.address}
-                  onChange={(e) =>
-                    setStoreSettings({ ...storeSettings, pickup_address: e.target.value })
-                  }
-                  placeholder="Rua Principal, 100 - Centro, Espera Feliz - MG"
-                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
-                />
-                <span className="text-[10px] text-[#7E6C58] mt-0.5 block">
-                  Exibido na confirmação de pedidos com retirada no balcão.
-                </span>
-              </div>
+            {/* SEÇÃO 1: IDENTIDADE & MARCA */}
+            <div className="space-y-4">
+              <h3 className="font-serif font-bold text-base text-[#3A2E1F] border-b border-[#3A2E1F]/10 pb-2">
+                1. Informações & Identidade da Padaria
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">Nome da Padaria</label>
+                  <input
+                    type="text"
+                    value={storeSettings.name}
+                    onChange={(e) =>
+                      setStoreSettings({ ...storeSettings, name: e.target.value })
+                    }
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                  />
+                </div>
 
-              <div>
-                <label className="block font-semibold text-[#554432] mb-1">Nome da Padaria</label>
-                <input
-                  type="text"
-                  value={storeSettings.name}
-                  onChange={(e) =>
-                    setStoreSettings({ ...storeSettings, name: e.target.value })
-                  }
-                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
-                />
-              </div>
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">Instagram (@usuario)</label>
+                  <input
+                    type="text"
+                    value={storeSettings.instagram || ''}
+                    onChange={(e) =>
+                      setStoreSettings({ ...storeSettings, instagram: e.target.value })
+                    }
+                    placeholder="@affetopaes"
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                  />
+                </div>
 
-              <div>
-                <label className="block font-semibold text-[#554432] mb-1">WhatsApp para Notificações</label>
-                <input
-                  type="text"
-                  value={storeSettings.whatsapp}
-                  onChange={(e) =>
-                    setStoreSettings({ ...storeSettings, whatsapp: e.target.value })
-                  }
-                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-[#554432] mb-1">Chave PIX da Padaria</label>
-                <input
-                  type="text"
-                  value={storeSettings.pix_key}
-                  onChange={(e) =>
-                    setStoreSettings({ ...storeSettings, pix_key: e.target.value })
-                  }
-                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-[#554432] mb-1">Valor Mínimo de Pedido (R$)</label>
-                <input
-                  type="number"
-                  value={storeSettings.min_order_value}
-                  onChange={(e) =>
-                    setStoreSettings({ ...storeSettings, min_order_value: Number(e.target.value) })
-                  }
-                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
-                />
+                <div className="sm:col-span-2">
+                  <label className="block font-semibold text-[#554432] mb-1">
+                    Descrição / Slogan (Exibido no Rodapé)
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={storeSettings.description || ''}
+                    onChange={(e) =>
+                      setStoreSettings({ ...storeSettings, description: e.target.value })
+                    }
+                    placeholder="Pães e folhados de fermentação lenta com levain de 36 horas, farinhas francesas selecionadas..."
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="pt-2">
+            {/* SEÇÃO 2: LOCALIZAÇÃO & ENDEREÇO */}
+            <div className="space-y-4">
+              <h3 className="font-serif font-bold text-base text-[#3A2E1F] border-b border-[#3A2E1F]/10 pb-2">
+                2. Localização & Endereços
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">
+                    Cidade
+                  </label>
+                  <input
+                    type="text"
+                    value={storeSettings.city || ''}
+                    onChange={(e) =>
+                      setStoreSettings({ ...storeSettings, city: e.target.value })
+                    }
+                    placeholder="Espera Feliz"
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">
+                    Estado (UF)
+                  </label>
+                  <input
+                    type="text"
+                    value={storeSettings.state || ''}
+                    onChange={(e) =>
+                      setStoreSettings({ ...storeSettings, state: e.target.value })
+                    }
+                    placeholder="MG"
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block font-semibold text-[#554432] mb-1">
+                    Texto de Localização no Cabeçalho e Rodapé (Ex: Espera Feliz - MG)
+                  </label>
+                  <input
+                    type="text"
+                    value={storeSettings.address}
+                    onChange={(e) =>
+                      setStoreSettings({ ...storeSettings, address: e.target.value })
+                    }
+                    placeholder="Espera Feliz - MG"
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                  />
+                  <span className="text-[10px] text-[#7E6C58] mt-0.5 block">
+                    Este dado alimenta a identificação principal de cidade e estado da loja.
+                  </span>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block font-semibold text-[#554432] mb-1">
+                    Endereço Completo para Retirada no Balcão e Rodapé
+                  </label>
+                  <input
+                    type="text"
+                    value={storeSettings.pickup_address || storeSettings.address}
+                    onChange={(e) =>
+                      setStoreSettings({ ...storeSettings, pickup_address: e.target.value })
+                    }
+                    placeholder="Rua Principal, 100 - Centro, Espera Feliz - MG"
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                  />
+                  <span className="text-[10px] text-[#7E6C58] mt-0.5 block">
+                    Utilizado no rodapé, no checkout e no modal de localização física da padaria.
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* SEÇÃO 3: CONTATOS & ATENDIMENTO */}
+            <div className="space-y-4">
+              <h3 className="font-serif font-bold text-base text-[#3A2E1F] border-b border-[#3A2E1F]/10 pb-2">
+                3. Canais de Atendimento
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">
+                    Telefone de Atendimento (Exibido no Rodapé)
+                  </label>
+                  <input
+                    type="text"
+                    value={storeSettings.phone || ''}
+                    onChange={(e) =>
+                      setStoreSettings({ ...storeSettings, phone: e.target.value })
+                    }
+                    placeholder="(32) 98468-0513"
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">
+                    WhatsApp (Apenas números com DDD e código 55)
+                  </label>
+                  <input
+                    type="text"
+                    value={storeSettings.whatsapp}
+                    onChange={(e) =>
+                      setStoreSettings({ ...storeSettings, whatsapp: e.target.value })
+                    }
+                    placeholder="5532984680513"
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                  />
+                  <span className="text-[10px] text-[#7E6C58] mt-0.5 block">
+                    Utilizado para envio do resumo do pedido via WhatsApp e links diretos.
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* SEÇÃO 4: HORÁRIOS & FORNADAS */}
+            <div className="space-y-4">
+              <h3 className="font-serif font-bold text-base text-[#3A2E1F] border-b border-[#3A2E1F]/10 pb-2">
+                4. Fornadas & Horários de Funcionamento
+              </h3>
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">
+                    Texto Informativo de Fornada Fresca (Exibido no Rodapé e Cabeçalho)
+                  </label>
+                  <input
+                    type="text"
+                    value={storeSettings.fresh_batch_hours || ''}
+                    onChange={(e) =>
+                      setStoreSettings({ ...storeSettings, fresh_batch_hours: e.target.value })
+                    }
+                    placeholder="Fornada fresca saindo às 08h00 e às 15h00."
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                  />
+                </div>
+
+                <div className="mt-3">
+                  <label className="block font-semibold text-[#554432] mb-2">
+                    Horários Semanais de Atendimento
+                  </label>
+                  <div className="border border-[#3A2E1F]/15 rounded-xl overflow-hidden divide-y divide-[#3A2E1F]/10">
+                    {storeSettings.opening_hours?.map((oh, idx) => (
+                      <div key={idx} className="p-2.5 sm:p-3 flex flex-wrap items-center justify-between gap-2 bg-white">
+                        <span className="w-32 font-bold text-[#3A2E1F]">{oh.day}</span>
+                        <div className="flex items-center gap-2">
+                          <label className="flex items-center gap-1 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={!oh.is_closed}
+                              onChange={(e) => {
+                                const updatedHours = [...storeSettings.opening_hours];
+                                updatedHours[idx].is_closed = !e.target.checked;
+                                setStoreSettings({ ...storeSettings, opening_hours: updatedHours });
+                              }}
+                              className="rounded accent-[#B8623F]"
+                            />
+                            <span className="text-[11px] text-[#554432]">Aberto</span>
+                          </label>
+
+                          {!oh.is_closed ? (
+                            <div className="flex items-center gap-1.5 ml-2">
+                              <input
+                                type="text"
+                                value={oh.open}
+                                onChange={(e) => {
+                                  const updatedHours = [...storeSettings.opening_hours];
+                                  updatedHours[idx].open = e.target.value;
+                                  setStoreSettings({ ...storeSettings, opening_hours: updatedHours });
+                                }}
+                                className="w-16 p-1 border border-[#3A2E1F]/20 rounded-lg text-center text-xs bg-[#FAF7F0]"
+                              />
+                              <span className="text-xs text-[#7E6C58]">às</span>
+                              <input
+                                type="text"
+                                value={oh.close}
+                                onChange={(e) => {
+                                  const updatedHours = [...storeSettings.opening_hours];
+                                  updatedHours[idx].close = e.target.value;
+                                  setStoreSettings({ ...storeSettings, opening_hours: updatedHours });
+                                }}
+                                className="w-16 p-1 border border-[#3A2E1F]/20 rounded-lg text-center text-xs bg-[#FAF7F0]"
+                              />
+                            </div>
+                          ) : (
+                            <span className="text-xs text-rose-600 font-semibold italic ml-2">
+                              Fechado
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* SEÇÃO 5: FINANCEIRO & REGRAS DE ENTREGA */}
+            <div className="space-y-4">
+              <h3 className="font-serif font-bold text-base text-[#3A2E1F] border-b border-[#3A2E1F]/10 pb-2">
+                5. Configurações Comerciais & PIX
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">Chave PIX da Padaria</label>
+                  <input
+                    type="text"
+                    value={storeSettings.pix_key}
+                    onChange={(e) =>
+                      setStoreSettings({ ...storeSettings, pix_key: e.target.value })
+                    }
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">Valor Mínimo de Pedido (R$)</label>
+                  <input
+                    type="number"
+                    value={storeSettings.min_order_value}
+                    onChange={(e) =>
+                      setStoreSettings({ ...storeSettings, min_order_value: Number(e.target.value) })
+                    }
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">Frete Grátis a Partir de (R$)</label>
+                  <input
+                    type="number"
+                    value={storeSettings.free_shipping_threshold || 120}
+                    onChange={(e) =>
+                      setStoreSettings({
+                        ...storeSettings,
+                        free_shipping_threshold: Number(e.target.value),
+                      })
+                    }
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-[#554432] mb-1">Tempo Médio de Preparo (min)</label>
+                  <input
+                    type="number"
+                    value={storeSettings.lead_time_minutes || 45}
+                    onChange={(e) =>
+                      setStoreSettings({
+                        ...storeSettings,
+                        lead_time_minutes: Number(e.target.value),
+                      })
+                    }
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0]"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* BOTÃO SALVAR */}
+            <div className="pt-4 border-t border-[#3A2E1F]/10 flex flex-wrap items-center gap-3">
               <button
-                onClick={() => {
-                  dataStore.saveStoreSettings(storeSettings);
+                id="btn-admin-salvar-configuracoes"
+                onClick={async () => {
+                  await dataStore.saveStoreSettings(storeSettings);
                   onOrderUpdated();
-                  alert('Configurações salvas com sucesso!');
+                  setSettingsSavedMessage('Configurações salvas com sucesso! As alterações já estão ativas em todo o sistema.');
+                  setTimeout(() => setSettingsSavedMessage(null), 5000);
                 }}
-                className="px-6 py-2.5 bg-[#B8623F] hover:bg-[#994E30] text-white rounded-xl text-xs font-semibold cursor-pointer shadow-xs"
+                className="px-6 py-3 bg-[#B8623F] hover:bg-[#994E30] text-white rounded-xl text-xs font-bold cursor-pointer shadow-xs transition-colors flex items-center gap-2"
               >
-                Salvar Alterações
+                <Check className="w-4 h-4" />
+                <span>Salvar Todas as Alterações</span>
               </button>
+
+              {settingsSavedMessage && (
+                <span className="text-xs text-emerald-700 font-medium">
+                  {settingsSavedMessage}
+                </span>
+              )}
             </div>
           </div>
         )}

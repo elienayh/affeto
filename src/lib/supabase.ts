@@ -4,11 +4,23 @@ import {
   INITIAL_COUPONS,
   INITIAL_DELIVERY_CEPS,
   INITIAL_DELIVERY_ZONES,
+  INITIAL_PRODUCTION_BATCHES,
   INITIAL_PRODUCTS,
   INITIAL_STORE_SETTINGS,
   SAMPLE_ORDERS,
 } from '../data/mockData';
-import { Category, Coupon, DeliveryCepRule, DeliveryZone, Order, Product, StoreSettings } from '../types';
+import {
+  Category,
+  Coupon,
+  DeliveryCepRule,
+  DeliveryZone,
+  Order,
+  OrderDelivery,
+  OrderDeliveryItem,
+  ProductionBatch,
+  Product,
+  StoreSettings,
+} from '../types';
 
 // Provided Supabase project URL
 export const SUPABASE_DEFAULT_URL = 'https://ropgdbgkjghwdxdglchz.supabase.co';
@@ -53,6 +65,7 @@ const STORAGE_KEYS = {
   ORDERS: 'affeto_orders_v2',
   STORE_SETTINGS: 'affeto_store_v2',
   FAVORITES: 'affeto_favorites_v2',
+  PRODUCTION_BATCHES: 'affeto_production_batches_v2',
   ANON_KEY_OVERRIDE: 'affeto_supabase_anon_key_override',
 };
 
@@ -221,6 +234,30 @@ export const dataStore = {
           coupon_code: order.coupon_code,
           notes: order.notes,
         });
+
+        if (order.deliveries && order.deliveries.length > 0) {
+          for (const del of order.deliveries) {
+            await supabase.from('order_deliveries').insert({
+              id: del.id,
+              order_id: order.id,
+              delivery_date: del.delivery_date,
+              delivery_time: del.delivery_time,
+              delivery_status: del.delivery_status,
+              delivery_fee: del.delivery_fee,
+            });
+
+            if (del.items && del.items.length > 0) {
+              const deliveryItems = del.items.map((item) => ({
+                id: item.id,
+                delivery_id: del.id,
+                order_item_id: item.order_item_id,
+                product_id: item.product_id,
+                quantity: item.quantity,
+              }));
+              await supabase.from('order_delivery_items').insert(deliveryItems);
+            }
+          }
+        }
       } catch (err) {
         console.warn('[Supabase Sync] insert error, saved locally:', err);
       }
@@ -250,6 +287,25 @@ export const dataStore = {
       created_at: new Date().toISOString(),
     });
 
+    // Se o pedido foi cancelado, libera capacidade da fornada
+    if (newStatus === 'CANCELLED') {
+      if (order.deliveries && order.deliveries.length > 0) {
+        for (const del of order.deliveries) {
+          if (del.items) {
+            for (const it of del.items) {
+              if (it.product_id) {
+                dataStore.releaseBatchCapacity(it.product_id, del.delivery_date, it.quantity);
+              }
+            }
+          }
+        }
+      } else if (order.scheduled_date && order.items) {
+        for (const it of order.items) {
+          dataStore.releaseBatchCapacity(it.product_id, order.scheduled_date, it.quantity);
+        }
+      }
+    }
+
     orders[idx] = order;
     setStored(STORAGE_KEYS.ORDERS, orders);
 
@@ -263,6 +319,163 @@ export const dataStore = {
     }
 
     return order;
+  },
+
+  getProductionBatches: async (): Promise<ProductionBatch[]> => {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.from('production_batches').select('*');
+        if (!error && data) {
+          return data as ProductionBatch[];
+        }
+      } catch {
+        // Fallback to local
+      }
+    }
+    return getStored<ProductionBatch[]>(STORAGE_KEYS.PRODUCTION_BATCHES, INITIAL_PRODUCTION_BATCHES);
+  },
+
+  saveProductionBatches: (batches: ProductionBatch[]) => {
+    setStored(STORAGE_KEYS.PRODUCTION_BATCHES, batches);
+  },
+
+  updateProductionBatch: async (
+    batchData: Partial<ProductionBatch> & { product_id: string; production_date: string }
+  ): Promise<ProductionBatch> => {
+    const batches = getStored<ProductionBatch[]>(STORAGE_KEYS.PRODUCTION_BATCHES, INITIAL_PRODUCTION_BATCHES);
+    const idx = batches.findIndex(
+      (b) => b.product_id === batchData.product_id && b.production_date === batchData.production_date
+    );
+
+    let updatedBatch: ProductionBatch;
+    if (idx >= 0) {
+      batches[idx] = {
+        ...batches[idx],
+        ...batchData,
+        updated_at: new Date().toISOString(),
+      };
+      updatedBatch = batches[idx];
+    } else {
+      updatedBatch = {
+        id: `batch-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        product_id: batchData.product_id,
+        production_date: batchData.production_date,
+        capacity: batchData.capacity ?? 10,
+        reserved_quantity: batchData.reserved_quantity ?? 0,
+        status: batchData.status ?? 'PLANNED',
+        notes: batchData.notes,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      batches.push(updatedBatch);
+    }
+    setStored(STORAGE_KEYS.PRODUCTION_BATCHES, batches);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('production_batches').upsert(
+          {
+            id: updatedBatch.id,
+            product_id: updatedBatch.product_id,
+            production_date: updatedBatch.production_date,
+            capacity: updatedBatch.capacity,
+            reserved_quantity: updatedBatch.reserved_quantity,
+            status: updatedBatch.status,
+            notes: updatedBatch.notes,
+            updated_at: updatedBatch.updated_at,
+          },
+          { onConflict: 'product_id,production_date' }
+        );
+      } catch (err) {
+        console.warn('[Supabase Sync Batch] error:', err);
+      }
+    }
+
+    return updatedBatch;
+  },
+
+  reserveBatchCapacity: async (
+    productId: string,
+    productionDate: string,
+    quantity: number,
+    defaultCapacity: number
+  ): Promise<{ success: boolean; error?: string }> => {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.rpc('reserve_production_batch_capacity', {
+          p_product_id: productId,
+          p_production_date: productionDate,
+          p_quantity: quantity,
+          p_default_capacity: defaultCapacity,
+        });
+        if (!error && data !== null) {
+          return { success: !!data };
+        }
+      } catch {
+        // Fallback to local atomic reservation
+      }
+    }
+
+    // Reserva atômica local
+    const batches = getStored<ProductionBatch[]>(STORAGE_KEYS.PRODUCTION_BATCHES, INITIAL_PRODUCTION_BATCHES);
+    let batch = batches.find((b) => b.product_id === productId && b.production_date === productionDate);
+
+    if (!batch) {
+      batch = {
+        id: `batch-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        product_id: productId,
+        production_date: productionDate,
+        capacity: defaultCapacity,
+        reserved_quantity: 0,
+        status: 'PLANNED',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      batches.push(batch);
+    }
+
+    if (batch.status === 'CANCELLED') {
+      return { success: false, error: 'A fornada para esta data foi cancelada.' };
+    }
+
+    if (batch.reserved_quantity + quantity > batch.capacity) {
+      return { success: false, error: 'Capacidade máxima para esta fornada foi atingida.' };
+    }
+
+    batch.reserved_quantity += quantity;
+    batch.updated_at = new Date().toISOString();
+    setStored(STORAGE_KEYS.PRODUCTION_BATCHES, batches);
+    return { success: true };
+  },
+
+  releaseBatchCapacity: async (
+    productId: string,
+    productionDate: string,
+    quantity: number
+  ): Promise<void> => {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.rpc('release_production_batch_capacity', {
+          p_product_id: productId,
+          p_production_date: productionDate,
+          p_quantity: quantity,
+        });
+      } catch {
+        // Fallback local
+      }
+    }
+
+    const batches = getStored<ProductionBatch[]>(STORAGE_KEYS.PRODUCTION_BATCHES, INITIAL_PRODUCTION_BATCHES);
+    const batch = batches.find((b) => b.product_id === productId && b.production_date === productionDate);
+    if (batch) {
+      batch.reserved_quantity = Math.max(0, batch.reserved_quantity - quantity);
+      batch.updated_at = new Date().toISOString();
+      setStored(STORAGE_KEYS.PRODUCTION_BATCHES, batches);
+    }
   },
 
   updatePaymentStatus: async (orderId: string, paymentStatus: Order['payment_status'], externalId?: string): Promise<Order | null> => {
@@ -289,11 +502,77 @@ export const dataStore = {
   },
 
   getStoreSettings: async (): Promise<StoreSettings> => {
-    return getStored<StoreSettings>(STORAGE_KEYS.STORE_SETTINGS, INITIAL_STORE_SETTINGS);
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('store_settings')
+          .select('*')
+          .limit(1)
+          .maybeSingle();
+        if (data && !error) {
+          const merged: StoreSettings = { ...INITIAL_STORE_SETTINGS, ...data };
+          setStored(STORAGE_KEYS.STORE_SETTINGS, merged);
+          return merged;
+        }
+      } catch (err) {
+        console.warn('[Supabase Sync] Error loading store_settings:', err);
+      }
+    }
+
+    const stored = getStored<StoreSettings>(STORAGE_KEYS.STORE_SETTINGS, INITIAL_STORE_SETTINGS);
+
+    // Sanitize any stale demo address from old mock templates if found in localStorage
+    if (
+      stored.address?.includes('Alameda Lorena') ||
+      stored.whatsapp === '5511987654321' ||
+      stored.phone === '(11) 98765-4321'
+    ) {
+      const sanitized: StoreSettings = {
+        ...stored,
+        address: INITIAL_STORE_SETTINGS.address,
+        pickup_address: INITIAL_STORE_SETTINGS.pickup_address,
+        city: INITIAL_STORE_SETTINGS.city,
+        state: INITIAL_STORE_SETTINGS.state,
+        phone: INITIAL_STORE_SETTINGS.phone,
+        whatsapp: INITIAL_STORE_SETTINGS.whatsapp,
+        description: stored.description || INITIAL_STORE_SETTINGS.description,
+        fresh_batch_hours: stored.fresh_batch_hours || INITIAL_STORE_SETTINGS.fresh_batch_hours,
+      };
+      setStored(STORAGE_KEYS.STORE_SETTINGS, sanitized);
+      return sanitized;
+    }
+
+    return { ...INITIAL_STORE_SETTINGS, ...stored };
   },
 
-  saveStoreSettings: (settings: StoreSettings) => {
+  saveStoreSettings: async (settings: StoreSettings): Promise<void> => {
     setStored(STORAGE_KEYS.STORE_SETTINGS, settings);
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('store_settings').upsert({
+          id: settings.id || 'store-affeto-matriz',
+          name: settings.name,
+          slug: settings.slug,
+          description: settings.description,
+          address: settings.address,
+          city: settings.city,
+          state: settings.state,
+          pickup_address: settings.pickup_address,
+          logo_url: settings.logo_url,
+          phone: settings.phone,
+          whatsapp: settings.whatsapp,
+          pix_key: settings.pix_key,
+          min_order_value: settings.min_order_value,
+          free_shipping_threshold: settings.free_shipping_threshold,
+          lead_time_minutes: settings.lead_time_minutes,
+          opening_hours: settings.opening_hours,
+        });
+      } catch (err) {
+        console.warn('[Supabase Sync] Error saving store_settings:', err);
+      }
+    }
   },
 
   getFavorites: (): string[] => {

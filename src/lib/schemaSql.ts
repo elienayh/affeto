@@ -309,4 +309,140 @@ CREATE POLICY "Public Access affeto-assets" ON storage.objects
 DROP POLICY IF EXISTS "Public Upload affeto-assets" ON storage.objects;
 CREATE POLICY "Public Upload affeto-assets" ON storage.objects
     FOR INSERT WITH CHECK (bucket_id = 'affeto-assets');
+
+-- 14. SISTEMA DE FORNADAS PROGRAMADAS & ENTREGAS MULTIPLAS
+CREATE TABLE IF NOT EXISTS public.production_batches (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    product_id UUID NOT NULL REFERENCES public.products(id) ON DELETE CASCADE,
+    batch_date DATE NOT NULL,
+    capacity INT NOT NULL DEFAULT 10,
+    reserved INT NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'FULL', 'CLOSED', 'CANCELLED')),
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_product_batch_date UNIQUE (product_id, batch_date)
+);
+
+CREATE TABLE IF NOT EXISTS public.order_deliveries (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id UUID NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
+    delivery_date DATE NOT NULL,
+    delivery_time TEXT,
+    delivery_status TEXT NOT NULL DEFAULT 'PENDING' CHECK (delivery_status IN ('PENDING', 'PREPARING', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED')),
+    delivery_fee NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.order_delivery_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    delivery_id UUID NOT NULL REFERENCES public.order_deliveries(id) ON DELETE CASCADE,
+    order_item_id UUID,
+    product_id UUID NOT NULL REFERENCES public.products(id) ON DELETE RESTRICT,
+    product_name TEXT NOT NULL,
+    quantity INT NOT NULL DEFAULT 1
+);
+
+ALTER TABLE public.production_batches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.order_deliveries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.order_delivery_items ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public Read Batches" ON public.production_batches;
+CREATE POLICY "Public Read Batches" ON public.production_batches FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public Modify Batches" ON public.production_batches;
+CREATE POLICY "Public Modify Batches" ON public.production_batches FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public Read Deliveries" ON public.order_deliveries;
+CREATE POLICY "Public Read Deliveries" ON public.order_deliveries FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public Modify Deliveries" ON public.order_deliveries;
+CREATE POLICY "Public Modify Deliveries" ON public.order_deliveries FOR ALL USING (true) WITH CHECK (true);
+
+-- RPC: Reserva Atômica de Capacidade por Fornada
+CREATE OR REPLACE FUNCTION public.reserve_production_batch_capacity(
+    p_product_id UUID,
+    p_batch_date DATE,
+    p_quantity INT,
+    p_default_capacity INT DEFAULT 10
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_batch RECORD;
+    v_new_reserved INT;
+    v_new_status TEXT;
+BEGIN
+    INSERT INTO public.production_batches (product_id, batch_date, capacity, reserved, status)
+    VALUES (p_product_id, p_batch_date, p_default_capacity, 0, 'OPEN')
+    ON CONFLICT (product_id, batch_date) DO NOTHING;
+
+    SELECT * INTO v_batch
+    FROM public.production_batches
+    WHERE product_id = p_product_id AND batch_date = p_batch_date
+    FOR UPDATE;
+
+    IF v_batch.status = 'CANCELLED' OR v_batch.status = 'CLOSED' THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Esta fornada foi encerrada ou cancelada.');
+    END IF;
+
+    IF (v_batch.reserved + p_quantity) > v_batch.capacity THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'error', format('Capacidade insuficiente na fornada de %s. Vagas disponíveis: %s.',
+                            p_batch_date, (v_batch.capacity - v_batch.reserved))
+        );
+    END IF;
+
+    v_new_reserved := v_batch.reserved + p_quantity;
+    v_new_status := CASE WHEN v_new_reserved >= v_batch.capacity THEN 'FULL' ELSE 'OPEN' END;
+
+    UPDATE public.production_batches
+    SET reserved = v_new_reserved, status = v_new_status, updated_at = NOW()
+    WHERE id = v_batch.id;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'batch_id', v_batch.id,
+        'reserved', v_new_reserved,
+        'capacity', v_batch.capacity,
+        'status', v_new_status
+    );
+END;
+$$;
+
+-- RPC: Liberação Atômica de Capacidade por Fornada
+CREATE OR REPLACE FUNCTION public.release_production_batch_capacity(
+    p_product_id UUID,
+    p_batch_date DATE,
+    p_quantity INT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_batch RECORD;
+    v_new_reserved INT;
+    v_new_status TEXT;
+BEGIN
+    SELECT * INTO v_batch
+    FROM public.production_batches
+    WHERE product_id = p_product_id AND batch_date = p_batch_date
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Fornada não encontrada.');
+    END IF;
+
+    v_new_reserved := GREATEST(0, v_batch.reserved - p_quantity);
+    v_new_status := CASE WHEN v_new_reserved < v_batch.capacity AND v_batch.status = 'FULL' THEN 'OPEN' ELSE v_batch.status END;
+
+    UPDATE public.production_batches
+    SET reserved = v_new_reserved, status = v_new_status, updated_at = NOW()
+    WHERE id = v_batch.id;
+
+    RETURN jsonb_build_object('success', true, 'batch_id', v_batch.id, 'reserved', v_new_reserved);
+END;
+$$;
 `;

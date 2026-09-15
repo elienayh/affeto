@@ -1,9 +1,12 @@
 import React, { useState, useMemo } from 'react';
-import { X, Plus, Minus, Check, Heart, ShieldAlert, ShoppingBag } from 'lucide-react';
-import { CartItemOptionSelection, Product } from '../types';
+import { X, Plus, Minus, Check, Heart, ShieldAlert, ShoppingBag, Calendar, Flame, AlertCircle } from 'lucide-react';
+import { getNextAvailableBatch, getUpcomingBatches } from '../lib/batchScheduler';
+import { CartItemOptionSelection, Order, ProductionBatch, Product } from '../types';
 
 interface ProductModalProps {
   product: Product | null;
+  orders?: Order[];
+  productionBatches?: ProductionBatch[];
   onClose: () => void;
   isFavorite: boolean;
   onToggleFavorite: (id: string) => void;
@@ -11,12 +14,17 @@ interface ProductModalProps {
     product: Product,
     quantity: number,
     selectedOptions: CartItemOptionSelection[],
-    notes: string
+    notes: string,
+    scheduledBatchDate?: string,
+    scheduledBatchLabel?: string,
+    deliveryWindow?: string
   ) => void;
 }
 
 export const ProductModal: React.FC<ProductModalProps> = ({
   product,
+  orders = [],
+  productionBatches = [],
   onClose,
   isFavorite,
   onToggleFavorite,
@@ -26,6 +34,30 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   const [quantity, setQuantity] = useState(1);
   const [notes, setNotes] = useState('');
+  const [selectedBatchDate, setSelectedBatchDate] = useState<string>('');
+
+  // Próximas fornadas disponíveis considerando a quantidade solicitada
+  const upcomingBatches = useMemo(() => {
+    if (!product.schedule_config?.is_scheduled_only) return [];
+    return getUpcomingBatches(product, orders, 4, new Date(), quantity, productionBatches);
+  }, [product, orders, quantity, productionBatches]);
+
+  // Fornada automática ideal que comporta integralmente a quantidade
+  const autoBatch = useMemo(() => {
+    if (!product.schedule_config?.is_scheduled_only) return null;
+    return getNextAvailableBatch(product, orders, new Date(), quantity, productionBatches);
+  }, [product, orders, quantity, productionBatches]);
+
+  // Sincroniza a data escolhida com a próxima disponível se ainda não tiver selecionado
+  const activeBatch = useMemo(() => {
+    if (!product.schedule_config?.is_scheduled_only) return null;
+    if (selectedBatchDate) {
+      const match = upcomingBatches.find((b) => b.dateString === selectedBatchDate);
+      if (match) return match;
+    }
+    return autoBatch;
+  }, [product, selectedBatchDate, upcomingBatches, autoBatch]);
+
   // Map option_id -> value_id
   const [selectedValues, setSelectedValues] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
@@ -84,7 +116,16 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   };
 
   const handleConfirm = () => {
-    onAddToCart(product, quantity, optionsSelections, notes);
+    const chosenBatch = activeBatch || autoBatch;
+    onAddToCart(
+      product,
+      quantity,
+      optionsSelections,
+      notes,
+      chosenBatch?.dateString,
+      chosenBatch?.formattedDate,
+      chosenBatch?.deliveryWindow
+    );
     onClose();
   };
 
@@ -153,6 +194,80 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                 <span>
                   <strong>Informações de Alergênicos:</strong> {product.allergens.join(', ')}.
                 </span>
+              </div>
+            )}
+
+            {/* Special Scheduled Batch Selector */}
+            {product.schedule_config?.is_scheduled_only && (
+              <div className="space-y-2.5 pt-3 border-t border-[#3A2E1F]/10">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 font-bold text-sm text-[#3A2E1F]">
+                    <Flame className="w-4 h-4 text-[#B8623F]" />
+                    <span>Fornada & Data de Entrega</span>
+                  </div>
+                  <span className="text-[11px] font-semibold text-[#B8623F]">
+                    {product.schedule_config.days_label || 'Fornada Programada'}
+                  </span>
+                </div>
+
+                {upcomingBatches.length > 0 && !upcomingBatches[0].isAvailable && autoBatch && (
+                  <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <span>
+                      A fornada de <strong>{upcomingBatches[0].formattedDate}</strong> está esgotada para a quantidade selecionada.
+                      Direcionamos seu pedido automaticamente para <strong>{autoBatch.formattedDate}</strong>.
+                    </span>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] text-[#7E6C58]">
+                    Escolha a data da fornada para este item:
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {upcomingBatches.map((b) => {
+                      const isSelected = activeBatch?.dateString === b.dateString;
+                      const hasCapacityForQty = b.remainingSlots >= quantity && b.status !== 'CANCELLED' && b.status !== 'CLOSED';
+
+                      return (
+                        <button
+                          key={b.dateString}
+                          type="button"
+                          disabled={!hasCapacityForQty}
+                          onClick={() => setSelectedBatchDate(b.dateString)}
+                          className={`p-2.5 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                            isSelected
+                              ? 'border-[#B8623F] bg-[#B8623F]/8 shadow-xs ring-1 ring-[#B8623F]'
+                              : hasCapacityForQty
+                              ? 'border-[#3A2E1F]/15 hover:border-[#B7A05E] bg-white cursor-pointer'
+                              : 'border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-xs text-[#3A2E1F]">
+                              {b.formattedDate}
+                            </span>
+                            {isSelected && (
+                              <Check className="w-3.5 h-3.5 text-[#B8623F] font-bold" />
+                            )}
+                          </div>
+                          <div className="mt-1 flex items-center justify-between text-[11px]">
+                            <span className="text-[#7E6C58]">{b.deliveryWindow}</span>
+                            <span
+                              className={`font-semibold px-1.5 py-0.5 rounded text-[10px] ${
+                                hasCapacityForQty
+                                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                  : 'bg-red-50 text-red-700 border border-red-200'
+                              }`}
+                            >
+                              {hasCapacityForQty ? 'Disponível' : 'Esgotada'}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             )}
 

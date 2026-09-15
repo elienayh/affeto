@@ -1,11 +1,12 @@
 import React from 'react';
 import { Sparkles, Plus, Check, Calendar, ArrowRight } from 'lucide-react';
 import { getNextAvailableBatch } from '../lib/batchScheduler';
-import { Order, Product } from '../types';
+import { Order, ProductionBatch, Product } from '../types';
 
 interface FeaturedItemBannerProps {
   product: Product;
   orders?: Order[];
+  productionBatches?: ProductionBatch[];
   onSelectProduct: (product: Product) => void;
   onQuickAdd: (product: Product) => void;
   isInCart?: boolean;
@@ -14,6 +15,7 @@ interface FeaturedItemBannerProps {
 export const FeaturedItemBanner: React.FC<FeaturedItemBannerProps> = ({
   product,
   orders = [],
+  productionBatches = [],
   onSelectProduct,
   onQuickAdd,
   isInCart,
@@ -25,7 +27,7 @@ export const FeaturedItemBanner: React.FC<FeaturedItemBannerProps> = ({
   const currentPrice = hasPromo ? product.promotional_price! : product.base_price;
 
   const nextBatch = product.schedule_config?.is_scheduled_only
-    ? getNextAvailableBatch(product, orders)
+    ? getNextAvailableBatch(product, orders, new Date(), 1, productionBatches)
     : null;
 
   return (
@@ -84,7 +86,7 @@ export const FeaturedItemBanner: React.FC<FeaturedItemBannerProps> = ({
                 </div>
                 {nextBatch && (
                   <span className="font-bold text-emerald-800 bg-emerald-100/80 px-2.5 py-1 rounded-lg">
-                    Próxima saída: {nextBatch.formattedDate} ({nextBatch.remainingSlots} vagas)
+                    Próxima entrega: {nextBatch.formattedDate}
                   </span>
                 )}
               </div>

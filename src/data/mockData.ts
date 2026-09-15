@@ -1,4 +1,4 @@
-import { Category, Coupon, DeliveryCepRule, DeliveryZone, Order, Product, StoreSettings } from '../types';
+import { Category, Coupon, DeliveryCepRule, DeliveryZone, Order, ProductionBatch, Product, StoreSettings } from '../types';
 
 export const INITIAL_DELIVERY_CEPS: DeliveryCepRule[] = [
   {
@@ -145,7 +145,9 @@ export const INITIAL_PRODUCTS: Product[] = [
       is_scheduled_only: true,
       available_days: [2, 5], // Terça-feira (2) e Sexta-feira (5)
       batch_limit: 10, // 10 unidades por fornada
-      days_label: 'Fornadas às Terças e Sextas (Lote de 10 unidades)',
+      days_label: 'Fornadas às Terças e Sextas',
+      min_lead_days: 1,
+      delivery_window: '14:00 - 18:00',
     },
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -285,6 +287,14 @@ export const INITIAL_PRODUCTS: Product[] = [
     allergens: ['Contém Glúten', 'Contém Leite', 'Contém Ovos'],
     tags: ['Afeto & Memória', 'Queridinho'],
     image_url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=800&q=80',
+    schedule_config: {
+      is_scheduled_only: true,
+      available_days: [2], // Terça-feira (2)
+      batch_limit: 10, // 10 unidades por fornada
+      days_label: 'Fornadas às Terças-feiras',
+      min_lead_days: 1,
+      delivery_window: '14:00 - 18:00',
+    },
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -442,6 +452,7 @@ export const INITIAL_STORE_SETTINGS: StoreSettings = {
   id: 'store-affeto-matriz',
   name: 'Affeto Pães Artesanais',
   slug: 'affeto-paes',
+  description: 'Pães e folhados de fermentação lenta com levain de 36 horas, farinhas francesas selecionadas e respeito ao tempo do trigo.',
   address: 'Espera Feliz - MG',
   city: 'Espera Feliz',
   state: 'MG',
@@ -450,8 +461,11 @@ export const INITIAL_STORE_SETTINGS: StoreSettings = {
   phone: '(32) 98468-0513',
   whatsapp: '5532984680513',
   pix_key: 'contato@affetopaes.com.br',
+  instagram: '@affetopaes',
+  fresh_batch_hours: 'Fornadas frescas saindo às 08h00 e às 15h00.',
   is_open: true,
   min_order_value: 20.0,
+  free_shipping_threshold: 120.0,
   lead_time_minutes: 45,
   opening_hours: [
     { day: 'Segunda-feira', open: '07:30', close: '19:30', is_closed: false },
@@ -613,3 +627,6 @@ export const SAMPLE_ORDERS: Order[] = [
     updated_at: new Date(Date.now() - 600000).toISOString(),
   },
 ];
+
+export const INITIAL_PRODUCTION_BATCHES: ProductionBatch[] = [];
+
