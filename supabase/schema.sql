@@ -121,9 +121,12 @@ CREATE TABLE IF NOT EXISTS public.categories (
     description TEXT,
     sort_order INT NOT NULL DEFAULT 0,
     active BOOLEAN NOT NULL DEFAULT true,
+    is_active BOOLEAN NOT NULL DEFAULT true,
     image_url TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE IF EXISTS public.categories ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
+ALTER TABLE IF EXISTS public.categories ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
 
 -- 6. PRODUCTS
 CREATE TABLE IF NOT EXISTS public.products (
@@ -136,6 +139,7 @@ CREATE TABLE IF NOT EXISTS public.products (
     promotional_price NUMERIC(10,2),
     unit TEXT NOT NULL DEFAULT 'unidade',
     is_active BOOLEAN NOT NULL DEFAULT true,
+    active BOOLEAN NOT NULL DEFAULT true,
     is_featured BOOLEAN NOT NULL DEFAULT false,
     stock_quantity INT NOT NULL DEFAULT 0,
     track_stock BOOLEAN NOT NULL DEFAULT true,
@@ -145,6 +149,8 @@ CREATE TABLE IF NOT EXISTS public.products (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE IF EXISTS public.products ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+ALTER TABLE IF EXISTS public.products ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
 
 -- 7. PRODUCT_IMAGES
 CREATE TABLE IF NOT EXISTS public.product_images (
@@ -455,8 +461,40 @@ CREATE TABLE IF NOT EXISTS public.reviews (
 );
 
 -- ==========================================================
--- ROW LEVEL SECURITY (RLS) - Padrão Deny com Policies
+-- ROW LEVEL SECURITY (RLS) & POLICIES (Idempotente e Seguro)
 -- ==========================================================
+-- Garante colunas necessárias mesmo se as tabelas já foram criadas anteriormente
+ALTER TABLE IF EXISTS public.categories ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
+ALTER TABLE IF EXISTS public.categories ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+ALTER TABLE IF EXISTS public.products ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+ALTER TABLE IF EXISTS public.products ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
+ALTER TABLE IF EXISTS public.delivery_zones ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
+ALTER TABLE IF EXISTS public.delivery_zones ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+ALTER TABLE IF EXISTS public.coupons ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
+ALTER TABLE IF EXISTS public.coupons ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+ALTER TABLE IF EXISTS public.banners ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
+ALTER TABLE IF EXISTS public.banners ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+ALTER TABLE IF EXISTS public.stores ADD COLUMN IF NOT EXISTS logo_url TEXT;
+ALTER TABLE IF EXISTS public.stores ADD COLUMN IF NOT EXISTS pickup_address TEXT;
+ALTER TABLE IF EXISTS public.stores ADD COLUMN IF NOT EXISTS whatsapp TEXT DEFAULT '5532984680513';
+ALTER TABLE IF EXISTS public.orders ADD COLUMN IF NOT EXISTS customer_phone TEXT;
+ALTER TABLE IF EXISTS public.orders ADD COLUMN IF NOT EXISTS payment_method TEXT;
+
+-- Tabela de CEPs de Atendimento
+CREATE TABLE IF NOT EXISTS public.delivery_ceps (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cep TEXT NOT NULL,
+    label TEXT,
+    fee NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+    estimated_minutes INT DEFAULT 40,
+    active BOOLEAN NOT NULL DEFAULT true,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE IF EXISTS public.delivery_ceps ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
+ALTER TABLE IF EXISTS public.delivery_ceps ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+
+-- Habilitar RLS
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stores ENABLE ROW LEVEL SECURITY;
@@ -474,29 +512,97 @@ ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.order_status_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.delivery_zones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.delivery_ceps ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.favorites ENABLE ROW LEVEL SECURITY;
 
--- Catálogo Público (Leitura anônima permitida para catálogo ativo)
-CREATE POLICY "Public Read Categories" ON public.categories FOR SELECT USING (active = true);
-CREATE POLICY "Public Read Products" ON public.products FOR SELECT USING (is_active = true);
-CREATE POLICY "Public Read Product Images" ON public.product_images FOR SELECT USING (true);
-CREATE POLICY "Public Read Options" ON public.product_options FOR SELECT USING (true);
-CREATE POLICY "Public Read Option Values" ON public.product_option_values FOR SELECT USING (is_available = true);
-CREATE POLICY "Public Read Banners" ON public.banners FOR SELECT USING (active = true);
-CREATE POLICY "Public Read Stores" ON public.stores FOR SELECT USING (true);
-CREATE POLICY "Public Read Delivery Zones" ON public.delivery_zones FOR SELECT USING (active = true);
-CREATE POLICY "Public Read Active Coupons" ON public.coupons FOR SELECT USING (active = true);
+-- Catálogo Público (Leitura universal)
+DROP POLICY IF EXISTS "Public Read Categories" ON public.categories;
+CREATE POLICY "Public Read Categories" ON public.categories FOR SELECT USING (true);
 
--- Orders: Qualquer pessoa pode inserir pedidos (checkout guest), leitura com id do pedido
+DROP POLICY IF EXISTS "Public Read Products" ON public.products;
+CREATE POLICY "Public Read Products" ON public.products FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Read Product Images" ON public.product_images;
+CREATE POLICY "Public Read Product Images" ON public.product_images FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Read Options" ON public.product_options;
+CREATE POLICY "Public Read Options" ON public.product_options FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Read Option Values" ON public.product_option_values;
+CREATE POLICY "Public Read Option Values" ON public.product_option_values FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Read Banners" ON public.banners;
+CREATE POLICY "Public Read Banners" ON public.banners FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Read Stores" ON public.stores;
+CREATE POLICY "Public Read Stores" ON public.stores FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Read Delivery Zones" ON public.delivery_zones;
+CREATE POLICY "Public Read Delivery Zones" ON public.delivery_zones FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Read Delivery Ceps" ON public.delivery_ceps;
+CREATE POLICY "Public Read Delivery Ceps" ON public.delivery_ceps FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Read Active Coupons" ON public.coupons;
+CREATE POLICY "Public Read Active Coupons" ON public.coupons FOR SELECT USING (true);
+
+-- Pedidos (Checkout Guest e Consulta)
+DROP POLICY IF EXISTS "Public Create Orders" ON public.orders;
 CREATE POLICY "Public Create Orders" ON public.orders FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public Read Order By ID" ON public.orders;
 CREATE POLICY "Public Read Order By ID" ON public.orders FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Update Orders" ON public.orders;
+CREATE POLICY "Public Update Orders" ON public.orders FOR UPDATE USING (true);
+
+DROP POLICY IF EXISTS "Public Create Order Items" ON public.order_items;
 CREATE POLICY "Public Create Order Items" ON public.order_items FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public Read Order Items" ON public.order_items;
 CREATE POLICY "Public Read Order Items" ON public.order_items FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public Read Payments" ON public.payments;
 CREATE POLICY "Public Read Payments" ON public.payments FOR SELECT USING (true);
 
--- Admin Full Access: Usando service role ou autenticação de admin
-CREATE POLICY "Admin All Categories" ON public.categories FOR ALL USING (true);
-CREATE POLICY "Admin All Products" ON public.products FOR ALL USING (true);
-CREATE POLICY "Admin All Orders" ON public.orders FOR ALL USING (true);
-CREATE POLICY "Admin All Coupons" ON public.coupons FOR ALL USING (true);
-CREATE POLICY "Admin All Stores" ON public.stores FOR ALL USING (true);
+DROP POLICY IF EXISTS "Public Create Payments" ON public.payments;
+CREATE POLICY "Public Create Payments" ON public.payments FOR INSERT WITH CHECK (true);
+
+-- Acesso Administrativo Completo
+DROP POLICY IF EXISTS "Admin All Categories" ON public.categories;
+CREATE POLICY "Admin All Categories" ON public.categories FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Admin All Products" ON public.products;
+CREATE POLICY "Admin All Products" ON public.products FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Admin All Orders" ON public.orders;
+CREATE POLICY "Admin All Orders" ON public.orders FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Admin All Coupons" ON public.coupons;
+CREATE POLICY "Admin All Coupons" ON public.coupons FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Admin All Stores" ON public.stores;
+CREATE POLICY "Admin All Stores" ON public.stores FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Admin All Delivery Ceps" ON public.delivery_ceps;
+CREATE POLICY "Admin All Delivery Ceps" ON public.delivery_ceps FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Admin All Delivery Zones" ON public.delivery_zones;
+CREATE POLICY "Admin All Delivery Zones" ON public.delivery_zones FOR ALL USING (true) WITH CHECK (true);
+
+-- Configuração Automática do Bucket de Armazenamento para Fotos e Logo
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('affeto-assets', 'affeto-assets', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+DROP POLICY IF EXISTS "Public Access affeto-assets" ON storage.objects;
+CREATE POLICY "Public Access affeto-assets" ON storage.objects
+    FOR SELECT USING (bucket_id = 'affeto-assets');
+
+DROP POLICY IF EXISTS "Public Upload affeto-assets" ON storage.objects;
+CREATE POLICY "Public Upload affeto-assets" ON storage.objects
+    FOR INSERT WITH CHECK (bucket_id = 'affeto-assets');
+
+DROP POLICY IF EXISTS "Public Update affeto-assets" ON storage.objects;
+CREATE POLICY "Public Update affeto-assets" ON storage.objects
+    FOR UPDATE USING (bucket_id = 'affeto-assets');

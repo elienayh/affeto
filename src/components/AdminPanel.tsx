@@ -25,15 +25,8 @@ import {
   Calendar,
   Upload,
   Image as ImageIcon,
-  Lock,
-  LogOut,
-  KeyRound,
-  Eye,
-  EyeOff,
   Layers,
-  ArrowLeft,
 } from 'lucide-react';
-import { adminAuth } from '../lib/adminAuth';
 import { SUPABASE_FULL_SCHEMA_SQL } from '../lib/schemaSql';
 import { dataStore } from '../lib/supabase';
 import { orderService } from '../services/orderService';
@@ -61,23 +54,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   orders,
   onOrderUpdated,
 }) => {
-  // Authentication State
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => adminAuth.isAuthenticated());
-  const [loginEmail, setLoginEmail] = useState('toledodias87@gmail.com');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [loginError, setLoginError] = useState<string | null>(null);
-
-  // Password Change Modal State
-  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
-  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
-  const [newPasswordInput, setNewPasswordInput] = useState('');
-  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
-  const [passwordChangeStatus, setPasswordChangeStatus] = useState<{
-    error?: string;
-    success?: string;
-  } | null>(null);
-
   // Active Tab
   const [activeTab, setActiveTab] = useState<
     'orders' | 'products' | 'categories' | 'coupons' | 'ceps' | 'settings' | 'supabase'
@@ -154,55 +130,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   useEffect(() => {
     if (isOpen) {
       reloadData();
-      setIsAuthenticated(adminAuth.isAuthenticated());
     }
   }, [isOpen, onOrderUpdated]);
 
   if (!isOpen) return null;
-
-  // Handle Login
-  const handleLoginSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoginError(null);
-    const result = adminAuth.login(loginEmail, loginPassword);
-    if (result.success) {
-      setIsAuthenticated(true);
-      setLoginPassword('');
-    } else {
-      setLoginError(result.error || 'Falha ao autenticar.');
-    }
-  };
-
-  // Handle Logout
-  const handleLogout = () => {
-    adminAuth.logout();
-    setIsAuthenticated(false);
-  };
-
-  // Handle Password Change
-  const handleChangePasswordSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordChangeStatus(null);
-
-    if (newPasswordInput !== confirmPasswordInput) {
-      setPasswordChangeStatus({ error: 'A confirmação de senha não confere.' });
-      return;
-    }
-
-    const res = adminAuth.changePassword(currentPasswordInput, newPasswordInput);
-    if (res.success) {
-      setPasswordChangeStatus({ success: 'Senha alterada com sucesso!' });
-      setTimeout(() => {
-        setShowChangePasswordModal(false);
-        setCurrentPasswordInput('');
-        setNewPasswordInput('');
-        setConfirmPasswordInput('');
-        setPasswordChangeStatus(null);
-      }, 1500);
-    } else {
-      setPasswordChangeStatus({ error: res.error });
-    }
-  };
 
   // Handle CEP management
   const handleAddCep = () => {
@@ -361,126 +292,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const confirmedCount = orders.filter((o) => o.status === 'CONFIRMED').length;
 
   // -------------------------------------------------------------
-  // VIEW 1: FULL SCREEN ADMIN LOGIN PAGE (Se não estiver logado)
-  // -------------------------------------------------------------
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-[#FAF7F0] flex flex-col justify-center items-center p-4 selection:bg-[#B8623F] selection:text-white">
-        <div className="max-w-md w-full bg-white border border-[#3A2E1F]/15 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
-          {/* Logo & Header */}
-          <div className="text-center space-y-3">
-            <div className="mx-auto w-16 h-16 rounded-full overflow-hidden border-2 border-[#B8623F]/60 p-0.5 shadow-sm bg-[#FAF7F0] flex items-center justify-center">
-              {storeSettings?.logo_url ? (
-                <img
-                  src={storeSettings.logo_url}
-                  alt="Affeto Pães"
-                  className="w-full h-full rounded-full object-cover"
-                />
-              ) : (
-                <div className="w-full h-full bg-[#F3ECDD] rounded-full flex items-center justify-center font-serif font-bold text-3xl text-[#3A2E1F]">
-                  A
-                </div>
-              )}
-            </div>
-            <div>
-              <h1 className="font-serif font-bold text-2xl text-[#3A2E1F]">
-                Affeto Pães Artesanais
-              </h1>
-              <p className="text-xs text-[#7E6C58] uppercase tracking-wider font-semibold">
-                Painel Administrativo & Gestão
-              </p>
-            </div>
-          </div>
-
-          {/* Super Admin Notice */}
-          <div className="p-3 bg-[#F3ECDD] border border-[#B7A05E]/30 rounded-2xl text-xs text-[#554432] space-y-1">
-            <div className="flex items-center gap-1.5 font-bold text-[#3A2E1F]">
-              <Lock className="w-3.5 h-3.5 text-[#B8623F]" />
-              <span>Acesso Super Admin Restrito</span>
-            </div>
-            <p className="text-[11px] text-[#7E6C58]">
-              Usuário: <strong className="text-[#3A2E1F]">toledodias87@gmail.com</strong>
-            </p>
-            <p className="text-[11px] text-[#7E6C58]">
-              Senha temporária inicial: <code className="bg-white/80 px-1 rounded text-[#B8623F] font-mono">tamiris123</code>
-            </p>
-          </div>
-
-          {loginError && (
-            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              <span>{loginError}</span>
-            </div>
-          )}
-
-          {/* Login Form */}
-          <form onSubmit={handleLoginSubmit} className="space-y-4 text-xs">
-            <div>
-              <label className="block font-semibold text-[#554432] mb-1">
-                E-mail do Administrador
-              </label>
-              <input
-                id="input-login-admin-email"
-                type="email"
-                required
-                value={loginEmail}
-                onChange={(e) => setLoginEmail(e.target.value)}
-                placeholder="seu-email@exemplo.com"
-                className="w-full p-3 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#B8623F]/30 text-[#3A2E1F]"
-              />
-            </div>
-
-            <div>
-              <label className="block font-semibold text-[#554432] mb-1">
-                Senha de Acesso
-              </label>
-              <div className="relative">
-                <input
-                  id="input-login-admin-senha"
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  placeholder="Digite sua senha"
-                  className="w-full p-3 pr-10 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#B8623F]/30 text-[#3A2E1F]"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#7E6C58] hover:text-[#3A2E1F]"
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            <button
-              id="btn-login-admin-submit"
-              type="submit"
-              className="w-full py-3 bg-[#B8623F] hover:bg-[#994E30] text-white font-semibold rounded-xl cursor-pointer shadow-md transition-all text-sm mt-2 flex items-center justify-center gap-2"
-            >
-              <Lock className="w-4 h-4" />
-              <span>Entrar no Painel</span>
-            </button>
-          </form>
-
-          {/* Back to store */}
-          <div className="text-center pt-2 border-t border-[#3A2E1F]/10">
-            <button
-              onClick={onClose}
-              className="text-xs text-[#7E6C58] hover:text-[#B8623F] transition-colors flex items-center justify-center gap-1.5 mx-auto font-medium cursor-pointer"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Voltar para o Cardápio da Loja</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // -------------------------------------------------------------
-  // VIEW 2: FULL SCREEN COMPLETE ADMIN DASHBOARD (Logado)
+  // FULL SCREEN COMPLETE ADMIN DASHBOARD (Acesso Direto)
   // -------------------------------------------------------------
   return (
     <div className="min-h-screen bg-[#F8F6F0] text-[#3A2E1F] flex flex-col selection:bg-[#B8623F] selection:text-white">
@@ -519,45 +331,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
 
             {/* Admin Profile & Actions */}
-            <div className="flex items-center gap-2.5 text-xs">
-              <div className="hidden md:flex flex-col text-right">
-                <span className="font-bold text-[#3A2E1F]">toledodias87@gmail.com</span>
-                <span className="text-[10px] text-[#B8623F] font-semibold">Super Administrador</span>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="hidden sm:flex flex-col text-right">
+                <span className="font-bold text-[#3A2E1F]">Painel de Gestão</span>
+                <span className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1 justify-end">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span> Acesso Direto
+                </span>
               </div>
-
-              {/* Change Password Button */}
-              <button
-                id="btn-admin-alterar-senha"
-                onClick={() => {
-                  setPasswordChangeStatus(null);
-                  setShowChangePasswordModal(true);
-                }}
-                className="px-3 py-1.5 rounded-xl border border-[#3A2E1F]/15 bg-[#FAF7F0] hover:bg-[#EADBBA]/50 text-[#3A2E1F] transition-colors flex items-center gap-1.5 font-medium cursor-pointer"
-                title="Alterar Senha do Super Admin"
-              >
-                <KeyRound className="w-3.5 h-3.5 text-[#B8623F]" />
-                <span className="hidden sm:inline">Alterar Senha</span>
-              </button>
 
               {/* View Store Button */}
               <button
                 id="btn-admin-ver-loja"
                 onClick={onClose}
-                className="px-3 py-1.5 rounded-xl bg-[#B8623F] hover:bg-[#994E30] text-white transition-colors flex items-center gap-1.5 font-semibold cursor-pointer shadow-xs"
-                title="Ir para o cardápio da loja"
+                className="px-3.5 py-2 rounded-xl bg-[#B8623F] hover:bg-[#994E30] text-white transition-colors flex items-center gap-1.5 font-semibold cursor-pointer shadow-xs"
+                title="Voltar para o cardápio da loja"
               >
-                <Store className="w-3.5 h-3.5" />
-                <span>Ver Loja</span>
-              </button>
-
-              {/* Logout Button */}
-              <button
-                id="btn-admin-logout"
-                onClick={handleLogout}
-                className="p-1.5 rounded-xl hover:bg-rose-50 text-[#7E6C58] hover:text-rose-600 transition-colors cursor-pointer"
-                title="Encerrar Sessão"
-              >
-                <LogOut className="w-4 h-4" />
+                <Store className="w-4 h-4" />
+                <span>Voltar à Loja</span>
               </button>
             </div>
           </div>
@@ -1941,104 +1731,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 Salvar Categoria
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ------------------------------------------------------------- */}
-      {/* MODAL 3: ALTERAR SENHA DO SUPER ADMIN */}
-      {/* ------------------------------------------------------------- */}
-      {showChangePasswordModal && (
-        <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-white border border-[#3A2E1F]/15 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
-              <div className="flex items-center gap-2">
-                <KeyRound className="w-5 h-5 text-[#B8623F]" />
-                <h3 className="font-serif font-bold text-lg text-[#3A2E1F]">
-                  Alterar Senha do Administrador
-                </h3>
-              </div>
-              <button
-                onClick={() => setShowChangePasswordModal(false)}
-                className="p-1 rounded-full hover:bg-black/5"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <p className="text-xs text-[#7E6C58]">
-              Usuário: <strong className="text-[#3A2E1F]">toledodias87@gmail.com</strong>
-            </p>
-
-            {passwordChangeStatus?.error && (
-              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
-                <span>{passwordChangeStatus.error}</span>
-              </div>
-            )}
-
-            {passwordChangeStatus?.success && (
-              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 shrink-0" />
-                <span>{passwordChangeStatus.success}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleChangePasswordSubmit} className="space-y-3 text-xs">
-              <div>
-                <label className="block font-semibold text-[#554432] mb-1">
-                  Senha Atual (Inicial: tamiris123)
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={currentPasswordInput}
-                  onChange={(e) => setCurrentPasswordInput(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-[#554432] mb-1">Nova Senha</label>
-                <input
-                  type="password"
-                  required
-                  value={newPasswordInput}
-                  onChange={(e) => setNewPasswordInput(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20"
-                  placeholder="Mínimo 4 caracteres"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-[#554432] mb-1">
-                  Confirmar Nova Senha
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={confirmPasswordInput}
-                  onChange={(e) => setConfirmPasswordInput(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20"
-                />
-              </div>
-
-              <div className="pt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowChangePasswordModal(false)}
-                  className="px-4 py-2 bg-gray-100 text-[#3A2E1F] rounded-xl text-xs font-semibold cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-[#B8623F] text-white rounded-xl text-xs font-semibold cursor-pointer shadow-xs"
-                >
-                  Atualizar Senha
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}
