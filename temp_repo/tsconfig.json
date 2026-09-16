@@ -1,0 +1,50 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
+    "module": "ESNext",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  },
+  "include": [
+    "src/main.tsx",
+    "src/App.tsx",
+    "src/types.ts",
+    "src/data.ts",
+    "src/components/**/*",
+    "src/lib/**/*",
+    "src/services/**/*",
+    "server.ts",
+    "vite.config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/app/**/*",
+    "src/components/layout/**/*",
+    "src/components/ui/**/*",
+    "src/middleware.ts",
+    "src/lib/actions/**/*",
+    "src/lib/queries/**/*",
+    "src/lib/services/**/*",
+    "src/lib/supabase/client.ts",
+    "src/lib/supabase/server.ts"
+  ]
+}
