@@ -176,12 +176,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     const file = e.target.files?.[0];
     if (file && storeSettings) {
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         const base64 = event.target?.result as string;
-        setStoreSettings({
+        const newSettings = {
           ...storeSettings,
           logo_url: base64,
-        });
+        };
+        setStoreSettings(newSettings);
+        setSettingsSavedMessage('Salvando logotipo no banco de dados e servidor...');
+        try {
+          const saved = await dataStore.saveStoreSettings(newSettings);
+          if (saved) {
+            setStoreSettings(saved);
+          }
+          await reloadData();
+          onOrderUpdated();
+          setSettingsSavedMessage('Logotipo atualizado e sincronizado com sucesso em todas as instâncias!');
+          setTimeout(() => setSettingsSavedMessage(null), 5000);
+        } catch (err) {
+          console.error('Erro ao salvar logo:', err);
+          setSettingsSavedMessage('Erro ao salvar logotipo. Tente novamente.');
+        }
       };
       reader.readAsDataURL(file);
     }

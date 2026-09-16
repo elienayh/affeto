@@ -21,7 +21,7 @@ import {
 import { catalogService } from './services/catalogService';
 import { orderService } from './services/orderService';
 import { pricingEngine } from './lib/pricingEngine';
-import { dataStore, DEFAULT_STORE_SETTINGS } from './lib/supabase';
+import { dataStore, DEFAULT_STORE_SETTINGS, fetchServerRuntimeConfig } from './lib/supabase';
 import { adminAuth } from './lib/adminAuth';
 import { getNextAvailableBatch } from './lib/batchScheduler';
 import {
@@ -165,6 +165,10 @@ export default function App() {
   const loadInitialData = async () => {
     setLoadingCatalog(true);
     try {
+      // 1. Fetch server runtime configuration so Supabase credentials and database synchronization
+      // are active immediately in this and all other browser sessions!
+      await fetchServerRuntimeConfig();
+
       const [prods, cats, zones, cps, sets, ords, cepRules, batches] = await Promise.all([
         catalogService.getProducts(),
         catalogService.getCategories(),

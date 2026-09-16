@@ -142,6 +142,7 @@ class ServerStorage {
   // STORE SETTINGS
   // -----------------------------------------------------------------
   public getSettings(): StoreSettings {
+    this.data = this.loadData();
     return this.data.storeSettings;
   }
 

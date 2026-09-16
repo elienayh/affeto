@@ -101,9 +101,37 @@ const STORAGE_KEYS = {
   URL_OVERRIDE: 'affeto_supabase_url_override',
 };
 
+let runtimeServerConfig: { supabaseUrl?: string; supabaseAnonKey?: string } | null = null;
+
+/**
+ * Automatically fetch the Supabase public configuration from the server backend.
+ * Ensures that EVERY browser and device has immediate, zero-configuration access
+ * to the exact same Supabase database.
+ */
+export async function fetchServerRuntimeConfig(): Promise<{ supabaseUrl: string; supabaseAnonKey: string }> {
+  try {
+    const res = await fetch('/api/config');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.supabaseAnonKey) {
+        runtimeServerConfig = data;
+        clientInstance = null;
+        return data;
+      }
+    }
+  } catch (err) {
+    console.warn('[Supabase] Could not fetch server config:', err);
+  }
+  return {
+    supabaseUrl: SUPABASE_DEFAULT_URL,
+    supabaseAnonKey: '',
+  };
+}
+
 const getEnvUrl = (): string => {
   const localOverride = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.URL_OVERRIDE) : null;
   if (localOverride) return localOverride;
+  if (runtimeServerConfig?.supabaseUrl) return runtimeServerConfig.supabaseUrl;
   const metaEnv = (import.meta as any).env;
   const procEnv = typeof process !== 'undefined' ? process.env : {};
   return metaEnv?.VITE_SUPABASE_URL || metaEnv?.NEXT_PUBLIC_SUPABASE_URL || procEnv?.VITE_SUPABASE_URL || procEnv?.NEXT_PUBLIC_SUPABASE_URL || SUPABASE_DEFAULT_URL;
@@ -112,6 +140,7 @@ const getEnvUrl = (): string => {
 const getEnvAnonKey = (): string => {
   const localOverride = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.ANON_KEY_OVERRIDE) : null;
   if (localOverride) return localOverride;
+  if (runtimeServerConfig?.supabaseAnonKey) return runtimeServerConfig.supabaseAnonKey;
   const metaEnv = (import.meta as any).env;
   const procEnv = typeof process !== 'undefined' ? process.env : {};
   return metaEnv?.VITE_SUPABASE_ANON_KEY || metaEnv?.NEXT_PUBLIC_SUPABASE_ANON_KEY || procEnv?.VITE_SUPABASE_ANON_KEY || procEnv?.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -288,7 +317,12 @@ export const dataStore = {
             id: toUuid(category.id),
             name: category.name,
             slug: category.slug,
-            display_order: category.sort_order,
+            description: category.description || '',
+            display_order: Number(category.sort_order ?? 0),
+            sort_order: Number(category.sort_order ?? 0),
+            active: Boolean(category.active ?? true),
+            is_active: Boolean(category.active ?? true),
+            image_url: category.image_url || null,
           },
           { onConflict: 'slug' }
         );
@@ -396,21 +430,21 @@ export const dataStore = {
               promotional_price: row.promotional_price ? Number(row.promotional_price) : (fallback?.promotional_price ?? null),
               unit: row.unit || fallback?.unit || 'unidade',
               is_active: row.is_active ?? row.active ?? true,
-              is_featured: fallback?.is_featured ?? false,
-              stock_quantity: fallback?.stock_quantity ?? 15,
-              track_stock: fallback?.track_stock ?? true,
+              is_featured: row.is_featured ?? fallback?.is_featured ?? false,
+              stock_quantity: row.stock_quantity ?? fallback?.stock_quantity ?? 15,
+              track_stock: row.track_stock ?? fallback?.track_stock ?? true,
               image_url: row.image_url || fallback?.image_url || 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=600&auto=format&fit=crop&q=80',
-              allergens: fallback?.allergens || ['Glúten'],
-              tags: fallback?.tags || [],
-              options: fallback?.options || [],
-              schedule_config: fallback?.schedule_config || {
+              allergens: Array.isArray(row.allergens) && row.allergens.length > 0 ? row.allergens : (fallback?.allergens || ['Glúten']),
+              tags: Array.isArray(row.tags) && row.tags.length > 0 ? row.tags : (fallback?.tags || []),
+              options: Array.isArray(row.options) && row.options.length > 0 ? row.options : (fallback?.options || []),
+              schedule_config: row.schedule_config && Object.keys(row.schedule_config).length > 0 ? row.schedule_config : (fallback?.schedule_config || {
                 is_scheduled_only: true,
                 available_days: [2, 4, 6],
                 batch_limit: 15,
                 days_label: 'Terças, Quintas e Sábados',
                 min_lead_days: 1,
                 delivery_window: '14:00 - 18:00',
-              },
+              }),
               created_at: row.created_at || fallback?.created_at || new Date().toISOString(),
               updated_at: row.updated_at || fallback?.updated_at || new Date().toISOString(),
             };
@@ -455,17 +489,28 @@ export const dataStore = {
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
+        const effectiveImg = serverSaved?.image_url || product.image_url || null;
         await supabase.from('products').upsert(
           {
             id: toUuid(product.id),
             category_id: product.category_id ? toUuid(product.category_id) : null,
             name: product.name,
             slug: product.slug,
-            description: product.description,
-            price: product.base_price,
-            promotional_price: product.promotional_price,
-            unit: product.unit,
-            is_active: product.is_active,
+            description: product.description || '',
+            price: Number(product.base_price || 0),
+            base_price: Number(product.base_price || 0),
+            promotional_price: product.promotional_price ? Number(product.promotional_price) : null,
+            unit: product.unit || 'unidade',
+            image_url: effectiveImg,
+            is_active: Boolean(product.is_active ?? true),
+            active: Boolean(product.is_active ?? true),
+            is_featured: Boolean(product.is_featured ?? false),
+            stock_quantity: Number(product.stock_quantity ?? 15),
+            track_stock: Boolean(product.track_stock ?? true),
+            allergens: Array.isArray(product.allergens) ? product.allergens : [],
+            tags: Array.isArray(product.tags) ? product.tags : [],
+            options: product.options || [],
+            schedule_config: product.schedule_config || {},
             updated_at: new Date().toISOString(),
           },
           { onConflict: 'slug' }
@@ -490,11 +535,21 @@ export const dataStore = {
           category_id: p.category_id ? toUuid(p.category_id) : null,
           name: p.name,
           slug: p.slug,
-          description: p.description,
-          price: p.base_price,
-          promotional_price: p.promotional_price,
-          unit: p.unit,
-          is_active: p.is_active,
+          description: p.description || '',
+          price: Number(p.base_price || 0),
+          base_price: Number(p.base_price || 0),
+          promotional_price: p.promotional_price ? Number(p.promotional_price) : null,
+          unit: p.unit || 'unidade',
+          image_url: p.image_url || null,
+          is_active: Boolean(p.is_active ?? true),
+          active: Boolean(p.is_active ?? true),
+          is_featured: Boolean(p.is_featured ?? false),
+          stock_quantity: Number(p.stock_quantity ?? 15),
+          track_stock: Boolean(p.track_stock ?? true),
+          allergens: Array.isArray(p.allergens) ? p.allergens : [],
+          tags: Array.isArray(p.tags) ? p.tags : [],
+          options: p.options || [],
+          schedule_config: p.schedule_config || {},
           updated_at: new Date().toISOString(),
         }));
         await supabase.from('products').upsert(rows, { onConflict: 'slug' });
@@ -1227,14 +1282,7 @@ export const dataStore = {
   // STORE SETTINGS & ADDRESS
   // -------------------------------------------------------------
   getStoreSettings: async (): Promise<StoreSettings> => {
-    // 1. Try server API first (universal cross-browser persistence for Logo, Address, Store info)
-    const serverSettings = await api.get<StoreSettings>('/api/store-settings');
-    if (serverSettings && serverSettings.name) {
-      setStored(STORAGE_KEYS.STORE_SETTINGS, serverSettings);
-      return serverSettings;
-    }
-
-    // 2. Try Supabase if configured
+    // 1. Try Supabase if configured (central shared cloud database)
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
@@ -1247,18 +1295,37 @@ export const dataStore = {
         if (data && !error) {
           const merged: StoreSettings = {
             ...DEFAULT_STORE_SETTINGS,
+            id: data.id || DEFAULT_STORE_SETTINGS.id,
             name: data.name || DEFAULT_STORE_SETTINGS.name,
+            slug: data.slug || DEFAULT_STORE_SETTINGS.slug,
+            description: data.description || DEFAULT_STORE_SETTINGS.description,
             address: data.address || DEFAULT_STORE_SETTINGS.address,
+            city: data.city || DEFAULT_STORE_SETTINGS.city,
+            state: data.state || DEFAULT_STORE_SETTINGS.state,
+            pickup_address: data.pickup_address || data.address || DEFAULT_STORE_SETTINGS.pickup_address,
+            logo_url: data.logo_url || '',
             phone: data.phone || DEFAULT_STORE_SETTINGS.phone,
             whatsapp: data.whatsapp || DEFAULT_STORE_SETTINGS.whatsapp,
             pix_key: data.pix_key || DEFAULT_STORE_SETTINGS.pix_key,
+            instagram: data.instagram || DEFAULT_STORE_SETTINGS.instagram,
+            is_open: data.is_open ?? true,
             min_order_value: Number(data.min_order_value || DEFAULT_STORE_SETTINGS.min_order_value),
             lead_time_minutes: Number(data.lead_time_minutes || DEFAULT_STORE_SETTINGS.lead_time_minutes),
+            opening_hours: Array.isArray(data.opening_hours) && data.opening_hours.length > 0 ? data.opening_hours : DEFAULT_STORE_SETTINGS.opening_hours,
           };
           setStored(STORAGE_KEYS.STORE_SETTINGS, merged);
           return merged;
         }
-      } catch {}
+      } catch (err) {
+        console.warn('[Supabase StoreSettings Read Warning]:', err);
+      }
+    }
+
+    // 2. Try server API (universal cross-browser persistence for Logo, Address, Store info)
+    const serverSettings = await api.get<StoreSettings>('/api/store-settings');
+    if (serverSettings && serverSettings.name) {
+      setStored(STORAGE_KEYS.STORE_SETTINGS, serverSettings);
+      return serverSettings;
     }
 
     const stored = getStored<StoreSettings>(STORAGE_KEYS.STORE_SETTINGS, DEFAULT_STORE_SETTINGS);
@@ -1277,10 +1344,11 @@ export const dataStore = {
       setStored(STORAGE_KEYS.STORE_SETTINGS, serverSaved);
     }
 
-    // 3. Sync to Supabase if configured
+    // 3. Sync to Supabase if configured (persists logo_url, address, pix, phone across all instances)
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
+        const effectiveLogo = finalSettings.logo_url || settings.logo_url || null;
         await supabase.from('stores').upsert(
           {
             id: toUuid(settings.id || 'store-affeto-matriz'),
@@ -1290,15 +1358,18 @@ export const dataStore = {
             phone: settings.phone,
             whatsapp: settings.whatsapp,
             pix_key: settings.pix_key,
-            min_order_value: settings.min_order_value,
-            lead_time_minutes: settings.lead_time_minutes,
-            is_open: true,
+            logo_url: effectiveLogo,
+            min_order_value: Number(settings.min_order_value || 0),
+            lead_time_minutes: Number(settings.lead_time_minutes || 45),
+            is_open: Boolean(settings.is_open ?? true),
+            opening_hours: settings.opening_hours || [],
             updated_at: new Date().toISOString(),
           },
           { onConflict: 'slug' }
         );
-      } catch {
-        // Also try store_settings table if stores doesn't accept
+      } catch (err) {
+        console.warn('[Supabase Store Save Warning]:', err);
+        // Fallback to store_settings table if needed
         try {
           await supabase.from('store_settings').upsert({
             id: toUuid(settings.id || 'store-affeto-matriz'),
@@ -1309,6 +1380,7 @@ export const dataStore = {
             phone: settings.phone,
             whatsapp: settings.whatsapp,
             pix_key: settings.pix_key,
+            logo_url: finalSettings.logo_url || settings.logo_url || null,
             min_order_value: settings.min_order_value,
             free_shipping_threshold: settings.free_shipping_threshold,
             lead_time_minutes: settings.lead_time_minutes,

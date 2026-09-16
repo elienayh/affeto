@@ -3,6 +3,13 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { calculateOrderPricing } from './src/lib/pricingEngine';
 import { serverStorage } from './src/server/storage';
+import {
+  syncStoreSettingsToSupabase,
+  syncProductToSupabase,
+  deleteProductFromSupabase,
+  syncCategoryToSupabase,
+  deleteCategoryFromSupabase,
+} from './src/server/supabaseServer';
 
 const currentDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
 
@@ -35,6 +42,16 @@ async function startServer() {
     });
   });
 
+  // Client configuration: guarantees every browser (Chrome, Safari, mobile, incognito)
+  // automatically connects to the same Supabase database without manual setup!
+  app.get('/api/config', (req, res) => {
+    res.json({
+      supabaseUrl: process.env.VITE_SUPABASE_URL || 'https://ropgdbgkjghwdxdglchz.supabase.co',
+      supabaseAnonKey: process.env.VITE_SUPABASE_ANON_KEY || '',
+      bakeryWhatsapp: process.env.VITE_BAKERY_WHATSAPP_NUMBER || '5532984680513',
+    });
+  });
+
   // -----------------------------------------------------------------
   // STORE SETTINGS & LOGO / ADDRESS PERSISTENCE
   // -----------------------------------------------------------------
@@ -48,10 +65,14 @@ async function startServer() {
     }
   };
 
-  const handleUpdateSettings = (req: express.Request, res: express.Response) => {
+  const handleUpdateSettings = async (req: express.Request, res: express.Response) => {
     try {
       const updated = serverStorage.updateSettings(req.body);
-      console.info('[API Settings Updated]: Logo and address persisted successfully');
+      // Dual persistence: sync immediately to Supabase database so all devices and instances see it!
+      syncStoreSettingsToSupabase(updated).catch((err) => {
+        console.warn('[Server] Supabase store sync warning:', err);
+      });
+      console.info('[API Settings Updated]: Logo and address persisted in server and queued for Supabase');
       res.json(updated);
     } catch (err: any) {
       console.error('[API Settings Update Error]:', err);
@@ -78,27 +99,37 @@ async function startServer() {
     }
   });
 
-  app.post('/api/products', (req, res) => {
+  app.post('/api/products', async (req, res) => {
     try {
       const saved = serverStorage.saveProduct(req.body);
+      // Dual persistence: sync to Supabase database with image, options and schedule
+      syncProductToSupabase(saved).catch((err) => {
+        console.warn('[Server] Supabase product sync warning:', err);
+      });
       res.json(saved);
     } catch (err) {
       res.status(500).json({ error: 'Erro ao salvar produto' });
     }
   });
 
-  app.put('/api/products/:id', (req, res) => {
+  app.put('/api/products/:id', async (req, res) => {
     try {
       const saved = serverStorage.saveProduct({ ...req.body, id: req.params.id });
+      syncProductToSupabase(saved).catch((err) => {
+        console.warn('[Server] Supabase product sync warning:', err);
+      });
       res.json(saved);
     } catch (err) {
       res.status(500).json({ error: 'Erro ao atualizar produto' });
     }
   });
 
-  app.delete('/api/products/:id', (req, res) => {
+  app.delete('/api/products/:id', async (req, res) => {
     try {
       const success = serverStorage.deleteProduct(req.params.id);
+      deleteProductFromSupabase(req.params.id).catch((err) => {
+        console.warn('[Server] Supabase product delete warning:', err);
+      });
       res.json({ success });
     } catch (err) {
       res.status(500).json({ error: 'Erro ao excluir produto' });
@@ -116,18 +147,24 @@ async function startServer() {
     }
   });
 
-  app.post('/api/categories', (req, res) => {
+  app.post('/api/categories', async (req, res) => {
     try {
       const saved = serverStorage.saveCategory(req.body);
+      syncCategoryToSupabase(saved).catch((err) => {
+        console.warn('[Server] Supabase category sync warning:', err);
+      });
       res.json(saved);
     } catch (err) {
       res.status(500).json({ error: 'Erro ao salvar categoria' });
     }
   });
 
-  app.delete('/api/categories/:id', (req, res) => {
+  app.delete('/api/categories/:id', async (req, res) => {
     try {
       const success = serverStorage.deleteCategory(req.params.id);
+      deleteCategoryFromSupabase(req.params.id).catch((err) => {
+        console.warn('[Server] Supabase category delete warning:', err);
+      });
       res.json({ success });
     } catch (err) {
       res.status(500).json({ error: 'Erro ao excluir categoria' });
