@@ -23,6 +23,7 @@ import { matchDeliveryCep } from '../lib/pricingEngine';
 import {
   cleanPhoneDigits,
   findCustomerByPhone,
+  lookupCustomerByPhone,
   formatPhoneMask,
   getWhatsAppOrderUrl,
   saveCustomerByPhone,
@@ -115,6 +116,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('PIX');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLookingUp, setIsLookingUp] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Sync scheduled date when recommended date changes
@@ -157,67 +159,65 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     );
   }, [items, scheduledDate, scheduledTime]);
 
-  // Look up customer by phone and auto-fill details
+  // Look up customer by phone and auto-fill details — async to hit the backend database
+  const applyCustomerData = (found: { name: string; phone: string; email: string; address?: any }) => {
+    if (found.name) setCustomerName(found.name);
+    if (found.email) setCustomerEmail(found.email);
+    if (found.address) {
+      setAddress((prev) => ({
+        ...prev,
+        street: found.address?.street || prev.street,
+        number: found.address?.number || prev.number,
+        complement: found.address?.complement || prev.complement,
+        neighborhood: found.address?.neighborhood || prev.neighborhood,
+        city: found.address?.city || prev.city,
+        state: found.address?.state || prev.state,
+        zip_code: found.address?.zip_code || prev.zip_code,
+      }));
+    }
+    setAutoFillMessage(`✓ Cliente reconhecido: ${found.name}! Dados preenchidos automaticamente.`);
+  };
+
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const rawVal = e.target.value;
-    const formatted = formatPhoneMask(rawVal);
+    const formatted = formatPhoneMask(e.target.value);
     setCustomerPhone(formatted);
+    setAutoFillMessage(null);
 
     const digits = cleanPhoneDigits(formatted);
     if (digits.length >= 10) {
-      const found = findCustomerByPhone(digits, orders);
-      if (found) {
-        if (found.name) setCustomerName(found.name);
-        if (found.email) setCustomerEmail(found.email);
-        if (found.address) {
-          setAddress((prev) => ({
-            ...prev,
-            street: found.address?.street || prev.street,
-            number: found.address?.number || prev.number,
-            complement: found.address?.complement || prev.complement,
-            neighborhood: found.address?.neighborhood || prev.neighborhood,
-            city: found.address?.city || prev.city,
-            state: found.address?.state || prev.state,
-            zip_code: found.address?.zip_code || prev.zip_code,
-          }));
-        }
-        setAutoFillMessage(`Cliente reconhecido: ${found.name}! Preenchemos seus dados automaticamente.`);
+      // First: instant local lookup (no latency)
+      const localFound = findCustomerByPhone(digits, orders);
+      if (localFound && localFound.name) {
+        applyCustomerData(localFound);
       } else {
-        setAutoFillMessage(null);
+        // Async lookup from backend database
+        setIsLookingUp(true);
+        lookupCustomerByPhone(digits, orders)
+          .then((found) => {
+            if (found && found.name) applyCustomerData(found);
+          })
+          .finally(() => setIsLookingUp(false));
       }
-    } else {
-      setAutoFillMessage(null);
     }
   };
 
   const handlePhoneBlur = () => {
     const digits = cleanPhoneDigits(customerPhone);
     if (digits.length >= 8 && !autoFillMessage) {
-      const found = findCustomerByPhone(digits, orders);
-      if (found) {
-        if (found.name) setCustomerName(found.name);
-        if (found.email) setCustomerEmail(found.email);
-        if (found.address) {
-          setAddress((prev) => ({
-            ...prev,
-            street: found.address?.street || prev.street,
-            number: found.address?.number || prev.number,
-            complement: found.address?.complement || prev.complement,
-            neighborhood: found.address?.neighborhood || prev.neighborhood,
-            city: found.address?.city || prev.city,
-            state: found.address?.state || prev.state,
-            zip_code: found.address?.zip_code || prev.zip_code,
-          }));
-        }
-        setAutoFillMessage(`Cliente reconhecido: ${found.name}! Preenchemos seus dados automaticamente.`);
-      }
+      setIsLookingUp(true);
+      lookupCustomerByPhone(digits, orders)
+        .then((found) => {
+          if (found && found.name) applyCustomerData(found);
+        })
+        .finally(() => setIsLookingUp(false));
     }
   };
 
-  // Cep validation
+  // Cep validation — only enforce when the store has CEP rules configured
+  const hasCepRules = (deliveryCepRules || []).length > 0;
   const currentCep = address.zip_code || initialCep;
   const matchedCepRule = currentCep ? matchDeliveryCep(currentCep, deliveryCepRules) : null;
-  const isDeliveryCepValid = deliveryType === 'PICKUP' || !!matchedCepRule;
+  const isDeliveryCepValid = deliveryType === 'PICKUP' || !hasCepRules || !!matchedCepRule;
 
   const availableTimeSlots = [
     '08:00 - 09:30 (Primeira Fornada da Manhã)',
@@ -256,9 +256,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         setErrorMessage('Por favor, informe o CEP para calcular a rota de entrega.');
         return;
       }
-      if (!isDeliveryCepValid) {
+      // Only enforce CEP match if the store has CEP rules configured
+      if (hasCepRules && !isDeliveryCepValid) {
         setErrorMessage(
-          'O CEP informado não está na rota de entregas da padaria. Por serem produtos artesanais frescos, não enviamos pelo correio. Por favor, escolha a opção Retirada no Balcão.'
+          'O CEP informado não está na rota de entregas da padaria. Por favor, escolha a opção Retirada no Balcão.'
         );
         return;
       }
@@ -379,27 +380,40 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* Telefone celular como fonte principal */}
+              {/* Telefone celular como identificador principal */}
               <div className="sm:col-span-2">
-                <label className="block text-xs font-bold text-[#3A2E1F] mb-1">
-                  Número de Telefone / WhatsApp *
+                <label className="block text-xs font-bold text-[#3A2E1F] mb-1 flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5 text-[#B8623F]" />
+                  Telefone / WhatsApp <span className="text-[#B8623F]">*</span>
+                  <span className="ml-auto text-[10px] font-normal text-[#7E6C58]">Identificador do pedido</span>
                 </label>
                 <div className="relative">
                   <input
                     id="checkout-telefone"
                     type="tel"
                     required
+                    autoFocus
                     placeholder="(32) 98468-0513"
                     value={customerPhone}
                     onChange={handlePhoneChange}
                     onBlur={handlePhoneBlur}
-                    className="w-full text-xs font-semibold p-3 pl-10 rounded-xl border-2 border-[#B8623F]/40 bg-white text-[#3A2E1F] focus:ring-2 focus:ring-[#B8623F] focus:border-[#B8623F] focus:outline-none"
+                    className={`w-full text-sm font-semibold p-3 pl-10 pr-10 rounded-xl border-2 bg-white text-[#3A2E1F] focus:outline-none transition-colors ${
+                      autoFillMessage
+                        ? 'border-emerald-400 focus:ring-2 focus:ring-emerald-400'
+                        : 'border-[#B8623F]/50 focus:ring-2 focus:ring-[#B8623F] focus:border-[#B8623F]'
+                    }`}
                   />
                   <Phone className="w-4 h-4 text-[#B8623F] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  {isLookingUp && (
+                    <Loader2 className="w-4 h-4 text-[#B8623F] absolute right-3.5 top-1/2 -translate-y-1/2 animate-spin" />
+                  )}
+                  {autoFillMessage && !isLookingUp && (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                  )}
                 </div>
-                <span className="text-[10px] text-[#7E6C58] mt-1 block">
-                  Informe seu WhatsApp com DDD. Se já comprou antes, seus dados serão preenchidos automaticamente.
-                </span>
+                <p className="text-[10px] text-[#7E6C58] mt-1">
+                  Informe seu WhatsApp com DDD. Clientes anteriores têm nome e endereço preenchidos automaticamente.
+                </p>
               </div>
 
               <div>

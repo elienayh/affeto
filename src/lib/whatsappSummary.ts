@@ -104,6 +104,39 @@ export const saveCustomerByPhone = (customer: CustomerData): void => {
 };
 
 /**
+ * Async lookup for customer by phone: searches local cache, in-memory orders, and backend database
+ */
+export const lookupCustomerByPhone = async (
+  phoneInput: string,
+  orders: Order[] = []
+): Promise<CustomerData | null> => {
+  const digits = cleanPhoneDigits(phoneInput);
+  if (digits.length < 8) return null;
+
+  // 1. Search in local cache & orders first (instant response)
+  const localMatch = findCustomerByPhone(phoneInput, orders);
+  if (localMatch && localMatch.name) {
+    return localMatch;
+  }
+
+  // 2. Query backend server database (/api/customers/lookup)
+  try {
+    const response = await fetch(`/api/customers/lookup?phone=${encodeURIComponent(digits)}`);
+    if (response.ok) {
+      const data = await response.json();
+      if (data && data.found && data.customer) {
+        saveCustomerByPhone(data.customer);
+        return data.customer;
+      }
+    }
+  } catch (err) {
+    console.warn('[Customer Lookup] Server fetch error:', err);
+  }
+
+  return null;
+};
+
+/**
  * Generate a complete, beautifully structured WhatsApp order summary for the bakery
  */
 export const generateWhatsAppOrderSummary = (order: Order): string => {

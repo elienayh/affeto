@@ -319,6 +319,8 @@ export default function App() {
     });
 
     showToast(`"${product.name}" adicionado à sua cesta!`);
+    // Abre o carrinho automaticamente para que o cliente veja o item
+    setIsCartOpen(true);
   };
 
   const handleQuickAdd = (product: Product) => {

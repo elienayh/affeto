@@ -13,6 +13,7 @@ import {
 import {
   Category,
   Coupon,
+  CustomerAddress,
   DeliveryCepRule,
   DeliveryZone,
   Order,
@@ -452,6 +453,30 @@ class ServerStorage {
       batch.updated_at = new Date().toISOString();
       this.saveDataToFile();
     }
+  }
+
+  public findCustomerByPhone(phone: string): {
+    name: string;
+    phone: string;
+    email: string;
+    address?: CustomerAddress;
+  } | null {
+    const clean = phone.replace(/\D/g, '');
+    if (clean.length < 8) return null;
+
+    // Search in reverse chronological order (latest orders first)
+    for (const order of this.data.orders) {
+      const orderClean = (order.customer_phone || '').replace(/\D/g, '');
+      if (orderClean === clean || (clean.length >= 8 && orderClean.endsWith(clean))) {
+        return {
+          name: order.customer_name || '',
+          phone: order.customer_phone || phone,
+          email: order.customer_email || '',
+          address: order.address,
+        };
+      }
+    }
+    return null;
   }
 }
 

@@ -245,6 +245,23 @@ async function startServer() {
   });
 
   // -----------------------------------------------------------------
+  // CUSTOMERS LOOKUP BY PHONE
+  // -----------------------------------------------------------------
+  app.get('/api/customers/lookup', (req, res) => {
+    try {
+      const phone = String(req.query.phone || '');
+      const customer = serverStorage.findCustomerByPhone(phone);
+      if (customer) {
+        return res.json({ found: true, customer });
+      }
+      return res.json({ found: false });
+    } catch (err) {
+      console.error('[API Customers Lookup Error]:', err);
+      return res.status(500).json({ error: 'Erro ao buscar cadastro de cliente' });
+    }
+  });
+
+  // -----------------------------------------------------------------
   // ORDERS PERSISTENCE
   // -----------------------------------------------------------------
   app.get('/api/orders', (req, res) => {

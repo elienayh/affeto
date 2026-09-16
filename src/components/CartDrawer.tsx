@@ -76,9 +76,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     return Array.from(dates);
   }, [items]);
 
+  const hasCepRules = deliveryCepRules.length > 0;
   const matchedCep = inputCep ? matchDeliveryCep(inputCep, deliveryCepRules) : null;
   const isCepValid = !!matchedCep;
-  const isDeliveryBlockedByCep = deliveryType === 'DELIVERY' && inputCep.trim().length >= 5 && !isCepValid;
+  // Only block if there ARE CEP rules configured AND the user typed an invalid one
+  const isDeliveryBlockedByCep = deliveryType === 'DELIVERY' && hasCepRules && inputCep.trim().length >= 5 && !isCepValid;
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-black/50 backdrop-blur-xs flex justify-end">
@@ -423,18 +425,16 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
               <button
                 id="btn-avancar-checkout"
-                disabled={isDeliveryBlockedByCep || (deliveryType === 'DELIVERY' && !inputCep.trim())}
+                disabled={isDeliveryBlockedByCep}
                 onClick={onProceedToCheckout}
                 className={`w-full py-3.5 font-semibold text-sm rounded-xl transition-all shadow-md flex items-center justify-center gap-2 ${
-                  isDeliveryBlockedByCep || (deliveryType === 'DELIVERY' && !inputCep.trim())
+                  isDeliveryBlockedByCep
                     ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                     : 'bg-[#B8623F] hover:bg-[#994E30] text-white hover:shadow-lg cursor-pointer'
                 }`}
               >
                 <span>
-                  {deliveryType === 'DELIVERY' && !inputCep.trim()
-                    ? 'Informe seu CEP para Continuar'
-                    : isDeliveryBlockedByCep
+                  {isDeliveryBlockedByCep
                     ? 'Selecione Retirada ou CEP Válido'
                     : 'Avançar para Agendamento'}
                 </span>
