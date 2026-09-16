@@ -30,15 +30,6 @@
   ],
   "exclude": [
     "node_modules",
-    "dist",
-    "src/app",
-    "src/components/layout",
-    "src/components/ui",
-    "src/lib/actions",
-    "src/lib/queries",
-    "src/lib/services",
-    "src/lib/supabase/client.ts",
-    "src/lib/supabase/server.ts",
-    "src/middleware.ts"
+    "dist"
   ]
 }

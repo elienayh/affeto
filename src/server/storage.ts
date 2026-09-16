@@ -165,6 +165,7 @@ class ServerStorage {
   // PRODUCTS
   // -----------------------------------------------------------------
   public getProducts(): Product[] {
+    this.data = this.loadData();
     return this.data.products;
   }
 
@@ -206,6 +207,7 @@ class ServerStorage {
   // CATEGORIES
   // -----------------------------------------------------------------
   public getCategories(): Category[] {
+    this.data = this.loadData();
     return this.data.categories;
   }
 

@@ -5,7 +5,6 @@ import {
   Kanban,
   Package,
   Ticket,
-  Database,
   Settings,
   Plus,
   Edit2,
@@ -14,7 +13,6 @@ import {
   Clock,
   Truck,
   Store,
-  Copy,
   Check,
   RefreshCw,
   ExternalLink,
@@ -28,17 +26,9 @@ import {
   Layers,
   LogOut,
   Phone,
-  Sparkles,
   CreditCard,
-  Key,
-  Eye,
-  EyeOff,
-  Save,
-  RotateCcw,
-  ShieldCheck,
 } from 'lucide-react';
 import { adminAuth } from '../lib/adminAuth';
-import { SUPABASE_FULL_SCHEMA_SQL } from '../lib/schemaSql';
 import { dataStore } from '../lib/supabase';
 import { orderService } from '../services/orderService';
 import {
@@ -69,43 +59,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 }) => {
   // Active Tab
   const [activeTab, setActiveTab] = useState<
-    'orders' | 'products' | 'categories' | 'coupons' | 'ceps' | 'settings' | 'supabase'
+    'orders' | 'products' | 'categories' | 'coupons' | 'ceps' | 'settings'
   >('orders');
-
-  // Supabase test and sync state
-  const [supabaseCreds, setSupabaseCreds] = useState(() => dataStore.getCredentialsInfo());
-  const [inputUrl, setInputUrl] = useState(() => dataStore.getCredentialsInfo().url);
-  const [inputAnonKey, setInputAnonKey] = useState(() => dataStore.getCredentialsInfo().anonKey);
-  const [showAnonKey, setShowAnonKey] = useState(false);
-  const [credentialsMsg, setCredentialsMsg] = useState<{ text: string; isError?: boolean } | null>(null);
-
-  const [supabaseTest, setSupabaseTest] = useState<{
-    tested: boolean;
-    loading: boolean;
-    connected: boolean;
-    message: string;
-    url: string;
-    hasAnonKey: boolean;
-    latencyMs?: number;
-    tablesFound?: Record<string, number>;
-    securityStatus?: string;
-  }>({
-    tested: false,
-    loading: false,
-    connected: false,
-    message: '',
-    url: dataStore.getCredentialsInfo().url,
-    hasAnonKey: dataStore.getCredentialsInfo().hasAnonKey,
-  });
-
-  const [syncStatus, setSyncStatus] = useState<{
-    syncing: boolean;
-    message: string | null;
-    success?: boolean;
-    details?: string;
-  }>({ syncing: false, message: null });
-
-  const [copiedSql, setCopiedSql] = useState(false);
 
   // Products and categories state
   const [products, setProducts] = useState<Product[]>([]);
@@ -269,78 +224,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       await reloadData();
       onOrderUpdated();
     }
-  };
-
-  // Handle Supabase Test
-  const handleTestSupabase = async (overrideUrl?: string, overrideKey?: string) => {
-    setSupabaseTest((prev) => ({ ...prev, loading: true }));
-    const result = await dataStore.testSupabaseConnection(
-      overrideUrl !== undefined ? overrideUrl : inputUrl,
-      overrideKey !== undefined ? overrideKey : inputAnonKey
-    );
-    setSupabaseTest({
-      tested: true,
-      loading: false,
-      connected: result.connected,
-      message: result.message,
-      url: result.url,
-      hasAnonKey: result.hasAnonKey,
-      latencyMs: result.latencyMs,
-      tablesFound: result.tablesFound,
-      securityStatus: result.securityStatus,
-    });
-  };
-
-  const handleSaveCredentials = async () => {
-    dataStore.setCredentialsOverride(inputUrl, inputAnonKey);
-    const updated = dataStore.getCredentialsInfo();
-    setSupabaseCreds(updated);
-    setCredentialsMsg({ text: 'Credenciais salvas com sucesso no navegador! Testando conexão imediatamente...' });
-    await handleTestSupabase(inputUrl, inputAnonKey);
-    await reloadData();
-    setTimeout(() => setCredentialsMsg(null), 6000);
-  };
-
-  const handleResetCredentials = async () => {
-    dataStore.clearCredentialsOverride();
-    const updated = dataStore.getCredentialsInfo();
-    setSupabaseCreds(updated);
-    setInputUrl(updated.url);
-    setInputAnonKey(updated.anonKey);
-    setCredentialsMsg({ text: 'Override local removido! O sistema voltou aos padrões de ambiente.' });
-    await handleTestSupabase(updated.url, updated.anonKey);
-    await reloadData();
-    setTimeout(() => setCredentialsMsg(null), 5000);
-  };
-
-  // Handle Full Sync with Supabase
-  const handleSyncAll = async () => {
-    setSyncStatus({ syncing: true, message: 'Sincronizando produtos, categorias, cupons e configurações com o Supabase...' });
-    const result = await dataStore.syncAllToSupabase();
-    if (result.success) {
-      setSyncStatus({
-        syncing: false,
-        success: true,
-        message: `Sincronização concluída com sucesso! ${result.productsSynced} produtos, ${result.categoriesSynced} categorias, ${result.couponsSynced} cupons e ${result.ordersSynced} pedidos sincronizados no Supabase.`,
-      });
-      await reloadData();
-      onOrderUpdated();
-    } else {
-      setSyncStatus({
-        syncing: false,
-        success: false,
-        message: `Erro na sincronização: ${result.error || 'Falha ao sincronizar'}`,
-      });
-    }
-    setTimeout(() => {
-      setSyncStatus((prev) => ({ ...prev, message: null }));
-    }, 8000);
-  };
-
-  const handleCopySql = () => {
-    navigator.clipboard.writeText(SUPABASE_FULL_SCHEMA_SQL);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 3000);
   };
 
   // Status advancement helper
@@ -519,19 +402,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             >
               <Settings className="w-3.5 h-3.5" />
               <span>Logotipo & Configurações da Loja</span>
-            </button>
-
-            <button
-              id="tab-admin-supabase"
-              onClick={() => setActiveTab('supabase')}
-              className={`px-3 py-2 rounded-xl font-medium transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
-                activeTab === 'supabase'
-                  ? 'bg-[#3A2E1F] text-white shadow-xs font-semibold'
-                  : 'text-[#7E6C58] hover:bg-black/5 hover:text-[#3A2E1F]'
-              }`}
-            >
-              <Database className="w-3.5 h-3.5" />
-              <span>Banco de Dados (Supabase)</span>
             </button>
           </div>
         </div>
@@ -1586,339 +1456,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   {settingsSavedMessage}
                 </span>
               )}
-            </div>
-          </div>
-        )}
-
-        {/* ------------------------------------------------------------- */}
-        {/* TAB 7: SUPABASE & BANCO DE DADOS */}
-        {/* ------------------------------------------------------------- */}
-        {activeTab === 'supabase' && (
-          <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-6 shadow-2xs space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#3A2E1F]/10">
-              <div>
-                <h2 className="font-serif font-bold text-xl text-[#3A2E1F] flex items-center gap-2">
-                  <Database className="w-5 h-5 text-[#B8623F]" />
-                  <span>Conexão Supabase & Persistência de Dados</span>
-                </h2>
-                <p className="text-xs text-[#7E6C58] mt-1">
-                  Verifique a integridade, o histórico de pedidos e a persistência em tempo real com o banco de dados PostgreSQL.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={handleTestSupabase}
-                  disabled={supabaseTest.loading}
-                  className="px-4 py-2.5 bg-[#3A2E1F] hover:bg-[#554432] text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${supabaseTest.loading ? 'animate-spin' : ''}`} />
-                  <span>Testar Conexão</span>
-                </button>
-
-                <button
-                  onClick={handleSyncAll}
-                  disabled={syncStatus.syncing}
-                  className="px-4 py-2.5 bg-[#B8623F] hover:bg-[#994E30] text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                >
-                  <Sparkles className={`w-3.5 h-3.5 ${syncStatus.syncing ? 'animate-spin' : ''}`} />
-                  <span>Sincronizar Tudo</span>
-                </button>
-
-                <button
-                  onClick={handleCopySql}
-                  className="px-4 py-2.5 bg-[#FAF7F0] hover:bg-[#EADBBA]/60 border border-[#3A2E1F]/20 text-[#3A2E1F] rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                >
-                  {copiedSql ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedSql ? 'Copiado!' : 'Copiar SQL'}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Sync Alert Banner */}
-            {syncStatus.message && (
-              <div
-                className={`p-4 rounded-xl text-xs flex items-center gap-2 ${
-                  syncStatus.success
-                    ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
-                    : 'bg-rose-50 text-rose-900 border border-rose-200'
-                }`}
-              >
-                {syncStatus.success ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                ) : (
-                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                )}
-                <span>{syncStatus.message}</span>
-              </div>
-            )}
-
-            {/* Supabase Credentials Configuration Card */}
-            <div className="p-5 bg-[#FAF7F0] border border-[#3A2E1F]/15 rounded-2xl space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#3A2E1F]/10">
-                <div className="flex items-center gap-2">
-                  <div className="p-2 bg-white rounded-lg border border-[#3A2E1F]/10 shadow-2xs">
-                    <Key className="w-4 h-4 text-[#B8623F]" />
-                  </div>
-                  <div>
-                    <h3 className="font-serif font-bold text-sm text-[#3A2E1F]">
-                      Chaves de Conexão com o Supabase
-                    </h3>
-                    <p className="text-[11px] text-[#7E6C58]">
-                      Insira ou corrija suas chaves API aqui para conectar diretamente ao banco PostgreSQL.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {supabaseCreds.isOverridden ? (
-                    <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
-                      Configurado Localmente no Navegador
-                    </span>
-                  ) : supabaseCreds.hasAnonKey ? (
-                    <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300">
-                      Variável de Ambiente (.env)
-                    </span>
-                  ) : (
-                    <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-900 border border-rose-300">
-                      Chave Não Configurada
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {credentialsMsg && (
-                <div
-                  className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
-                    credentialsMsg.isError
-                      ? 'bg-rose-50 text-rose-900 border border-rose-200'
-                      : 'bg-emerald-50 text-emerald-900 border border-emerald-200'
-                  }`}
-                >
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>{credentialsMsg.text}</span>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Supabase URL */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-[#3A2E1F] flex items-center justify-between">
-                    <span>URL do Projeto (VITE_SUPABASE_URL)</span>
-                    <span className="text-[10px] text-[#7E6C58] font-normal">Endpoint da API</span>
-                  </label>
-                  <input
-                    type="url"
-                    value={inputUrl}
-                    onChange={(e) => setInputUrl(e.target.value)}
-                    placeholder="https://seu-projeto.supabase.co"
-                    className="w-full px-3.5 py-2.5 text-xs bg-white border border-[#3A2E1F]/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#B8623F]/30 focus:border-[#B8623F] font-mono text-[#3A2E1F]"
-                  />
-                  <p className="text-[10px] text-[#7E6C58]">
-                    Localizado em: <em>Supabase Dashboard &gt; Project Settings &gt; API &gt; Project URL</em>.
-                  </p>
-                </div>
-
-                {/* Supabase Anon Key */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-[#3A2E1F] flex items-center justify-between">
-                    <span>Chave Anônima Pública (VITE_SUPABASE_ANON_KEY)</span>
-                    <span className="text-[10px] text-amber-700 font-semibold">Chave de acesso</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showAnonKey ? 'text' : 'password'}
-                      value={inputAnonKey}
-                      onChange={(e) => setInputAnonKey(e.target.value)}
-                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                      className="w-full pl-3.5 pr-10 py-2.5 text-xs bg-white border border-[#3A2E1F]/20 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#B8623F]/30 focus:border-[#B8623F] font-mono text-[#3A2E1F]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowAnonKey(!showAnonKey)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-[#7E6C58] hover:text-[#3A2E1F] transition-colors"
-                      title={showAnonKey ? 'Ocultar chave' : 'Mostrar chave'}
-                    >
-                      {showAnonKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-[#7E6C58]">
-                    Localizado em: <em>Supabase Dashboard &gt; Project Settings &gt; API &gt; Project API Keys &gt; anon / public</em>.
-                  </p>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleSaveCredentials}
-                    disabled={supabaseTest.loading}
-                    className="px-4 py-2 bg-[#B8623F] hover:bg-[#994E30] text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Salvar Credenciais e Conectar</span>
-                  </button>
-
-                  <button
-                    onClick={() => handleTestSupabase(inputUrl, inputAnonKey)}
-                    disabled={supabaseTest.loading}
-                    className="px-3.5 py-2 bg-white hover:bg-[#FAF7F0] border border-[#3A2E1F]/20 text-[#3A2E1F] rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${supabaseTest.loading ? 'animate-spin' : ''}`} />
-                    <span>Testar Dados Digitados</span>
-                  </button>
-                </div>
-
-                {supabaseCreds.isOverridden && (
-                  <button
-                    onClick={handleResetCredentials}
-                    className="px-3 py-2 text-rose-700 hover:bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Restaurar Padrão do Sistema</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Supabase Test Result */}
-            {supabaseTest.tested && (
-              <div
-                className={`p-4 rounded-xl text-xs space-y-3 ${
-                  supabaseTest.connected
-                    ? 'bg-emerald-50 text-emerald-950 border border-emerald-200'
-                    : 'bg-amber-50 text-amber-950 border border-amber-200'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-bold flex items-center gap-1.5">
-                    <span className={`w-2.5 h-2.5 rounded-full ${supabaseTest.connected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-                    {supabaseTest.connected ? 'Supabase Conectado e Operacional' : 'Atenção com a Conexão'}
-                  </span>
-                  {supabaseTest.latencyMs !== undefined && (
-                    <span className="text-[11px] font-mono bg-white/70 px-2 py-0.5 rounded border border-emerald-300">
-                      Latência: {supabaseTest.latencyMs}ms
-                    </span>
-                  )}
-                </div>
-                <p>{supabaseTest.message}</p>
-                {supabaseTest.securityStatus && (
-                  <div className="text-[11px] text-emerald-800 font-semibold flex items-center gap-1.5 pt-1 border-t border-emerald-200/60">
-                    <Check className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>{supabaseTest.securityStatus}</span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Database Metrics Grid */}
-            <div>
-              <h3 className="font-serif font-bold text-sm text-[#3A2E1F] mb-3">
-                Status das Tabelas e Registros no Supabase
-              </h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                <div className="p-3.5 bg-[#FAF7F0] border border-[#3A2E1F]/10 rounded-xl">
-                  <span className="text-[10px] uppercase font-bold text-[#7E6C58] block">Produtos</span>
-                  <span className="font-serif font-bold text-lg text-[#3A2E1F]">
-                    {supabaseTest.tablesFound?.products ?? products.length} itens
-                  </span>
-                  <span className="text-[10px] text-emerald-700 block mt-0.5 font-medium">Sincronizado</span>
-                </div>
-
-                <div className="p-3.5 bg-[#FAF7F0] border border-[#3A2E1F]/10 rounded-xl">
-                  <span className="text-[10px] uppercase font-bold text-[#7E6C58] block">Categorias</span>
-                  <span className="font-serif font-bold text-lg text-[#3A2E1F]">
-                    {supabaseTest.tablesFound?.categories ?? categories.length} ativas
-                  </span>
-                  <span className="text-[10px] text-emerald-700 block mt-0.5 font-medium">Sincronizado</span>
-                </div>
-
-                <div className="p-3.5 bg-[#FAF7F0] border border-[#3A2E1F]/10 rounded-xl">
-                  <span className="text-[10px] uppercase font-bold text-[#7E6C58] block">Pedidos & Histórico</span>
-                  <span className="font-serif font-bold text-lg text-[#B8623F]">
-                    {supabaseTest.tablesFound?.orders ?? orders.length} pedidos
-                  </span>
-                  <span className="text-[10px] text-emerald-700 block mt-0.5 font-medium">Auditoria Ativa</span>
-                </div>
-
-                <div className="p-3.5 bg-[#FAF7F0] border border-[#3A2E1F]/10 rounded-xl">
-                  <span className="text-[10px] uppercase font-bold text-[#7E6C58] block">Rotas de CEP</span>
-                  <span className="font-serif font-bold text-lg text-[#3A2E1F]">
-                    {ceps.length} CEPs
-                  </span>
-                  <span className="text-[10px] text-emerald-700 block mt-0.5 font-medium">Cadastrados</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Informações de Segurança e Integridade */}
-            <div className="p-4 rounded-xl bg-[#FAF7F0] border border-[#3A2E1F]/15 space-y-2 text-xs text-[#554432]">
-              <h4 className="font-bold text-[#3A2E1F] flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>Garantia de Persistência, Histórico e Segurança:</span>
-              </h4>
-              <ul className="list-disc list-inside space-y-1 text-[11px] text-[#7E6C58]">
-                <li>
-                  <strong className="text-[#3A2E1F]">Modificações de Admin:</strong> Ao criar ou alterar produtos, preços, fotos, CEPs e dados da padaria, os dados são persistidos imediatamente no banco de dados e sincronizados.
-                </li>
-                <li>
-                  <strong className="text-[#3A2E1F]">Pedidos e Itens:</strong> Cada pedido é gravado com cabeçalho, itens individuais e endereço associado no PostgreSQL.
-                </li>
-                <li>
-                  <strong className="text-[#3A2E1F]">Histórico de Auditoria:</strong> Toda transição de status (PENDING_PAYMENT, CONFIRMED, PREPARING, etc.) grava um log cronológico imutável na tabela <code className="bg-black/5 px-1 py-0.5 rounded font-mono">order_status_history</code>.
-                </li>
-              </ul>
-            </div>
-
-            {/* Guia Completo: Onde atualizar as chaves em todos os locais */}
-            <div className="p-5 rounded-2xl bg-white border border-[#3A2E1F]/15 space-y-3 text-xs text-[#3A2E1F]">
-              <div className="flex items-center gap-2 pb-2 border-b border-[#3A2E1F]/10">
-                <ShieldCheck className="w-4 h-4 text-[#B8623F]" />
-                <h4 className="font-bold font-serif text-sm">
-                  Onde e Como Atualizar as Chaves em Todos os Locais do Projeto:
-                </h4>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-[11px]">
-                <div className="p-3 bg-[#FAF7F0] rounded-xl border border-[#3A2E1F]/10 space-y-1.5">
-                  <span className="font-bold text-[#3A2E1F] block">1. No código local (.env)</span>
-                  <p className="text-[#7E6C58]">
-                    Crie ou edite o arquivo <code className="bg-black/5 px-1 py-0.5 rounded font-mono text-[#3A2E1F]">.env</code> na raiz do projeto:
-                  </p>
-                  <pre className="p-2 bg-[#3A2E1F] text-amber-100 rounded-lg font-mono text-[10px] overflow-x-auto">
-{`VITE_SUPABASE_URL="https://seu-projeto.supabase.co"
-VITE_SUPABASE_ANON_KEY="sua_chave_anon_aqui"
-SUPABASE_SERVICE_ROLE_KEY="sua_chave_service_role"`}
-                  </pre>
-                </div>
-
-                <div className="p-3 bg-[#FAF7F0] rounded-xl border border-[#3A2E1F]/10 space-y-1.5">
-                  <span className="font-bold text-[#3A2E1F] block">2. Se rodar em Next.js / SSR</span>
-                  <p className="text-[#7E6C58]">
-                    O Next.js exige o prefixo <code className="bg-black/5 px-1 py-0.5 rounded font-mono text-[#3A2E1F]">NEXT_PUBLIC_</code> para variáveis client-side:
-                  </p>
-                  <pre className="p-2 bg-[#3A2E1F] text-amber-100 rounded-lg font-mono text-[10px] overflow-x-auto">
-{`NEXT_PUBLIC_SUPABASE_URL="https://seu-projeto.supabase.co"
-NEXT_PUBLIC_SUPABASE_ANON_KEY="sua_chave_anon_aqui"
-SUPABASE_SERVICE_ROLE_KEY="sua_chave_service_role"`}
-                  </pre>
-                </div>
-
-                <div className="p-3 bg-[#FAF7F0] rounded-xl border border-[#3A2E1F]/10 space-y-1.5">
-                  <span className="font-bold text-[#3A2E1F] block">3. Na Hospedagem (Vercel / Netlify / Cloud Run)</span>
-                  <p className="text-[#7E6C58]">
-                    Acesse o painel do seu provedor de deploy &gt; <em>Settings</em> &gt; <em>Environment Variables</em> e adicione as mesmas variáveis para Production e Preview.
-                  </p>
-                </div>
-
-                <div className="p-3 bg-[#FAF7F0] rounded-xl border border-[#3A2E1F]/10 space-y-1.5">
-                  <span className="font-bold text-[#3A2E1F] block">4. Tabelas e Políticas (RLS) no Supabase</span>
-                  <p className="text-[#7E6C58]">
-                    Se criou um novo projeto Supabase, clique no botão <strong>"Copiar SQL"</strong> no topo desta aba, acesse o <em>SQL Editor</em> no Supabase e execute o script para criar todas as tabelas e permissões.
-                  </p>
-                </div>
-              </div>
             </div>
           </div>
         )}

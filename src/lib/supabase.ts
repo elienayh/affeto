@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { api } from './api';
+import { INITIAL_CATEGORIES, INITIAL_PRODUCTS } from '../data/mockData';
 import {
   Category,
   Coupon,
@@ -103,15 +104,17 @@ const STORAGE_KEYS = {
 const getEnvUrl = (): string => {
   const localOverride = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.URL_OVERRIDE) : null;
   if (localOverride) return localOverride;
-  const env = (import.meta as any).env;
-  return env?.VITE_SUPABASE_URL || env?.NEXT_PUBLIC_SUPABASE_URL || SUPABASE_DEFAULT_URL;
+  const metaEnv = (import.meta as any).env;
+  const procEnv = typeof process !== 'undefined' ? process.env : {};
+  return metaEnv?.VITE_SUPABASE_URL || metaEnv?.NEXT_PUBLIC_SUPABASE_URL || procEnv?.VITE_SUPABASE_URL || procEnv?.NEXT_PUBLIC_SUPABASE_URL || SUPABASE_DEFAULT_URL;
 };
 
 const getEnvAnonKey = (): string => {
   const localOverride = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.ANON_KEY_OVERRIDE) : null;
   if (localOverride) return localOverride;
-  const env = (import.meta as any).env;
-  return env?.VITE_SUPABASE_ANON_KEY || env?.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  const metaEnv = (import.meta as any).env;
+  const procEnv = typeof process !== 'undefined' ? process.env : {};
+  return metaEnv?.VITE_SUPABASE_ANON_KEY || metaEnv?.NEXT_PUBLIC_SUPABASE_ANON_KEY || procEnv?.VITE_SUPABASE_ANON_KEY || procEnv?.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 };
 
 let clientInstance: SupabaseClient | null = null;
@@ -197,6 +200,7 @@ export function getSupabaseClient(): SupabaseClient | null {
 
 // Helper for local storage
 function getStored<T>(key: string, fallback: T): T {
+  if (typeof localStorage === 'undefined') return fallback;
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return fallback;
@@ -207,6 +211,7 @@ function getStored<T>(key: string, fallback: T): T {
 }
 
 function setStored<T>(key: string, value: T): void {
+  if (typeof localStorage === 'undefined') return;
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (err) {
@@ -219,14 +224,7 @@ export const dataStore = {
   // CATEGORIES
   // -------------------------------------------------------------
   getCategories: async (): Promise<Category[]> => {
-    // 1. Try server API first (universal persistence across all devices/browsers)
-    const serverCats = await api.get<Category[]>('/api/categories');
-    if (serverCats && Array.isArray(serverCats)) {
-      setStored(STORAGE_KEYS.CATEGORIES, serverCats);
-      return serverCats;
-    }
-
-    // 2. Try Supabase if configured
+    // 1. Prioritize live Supabase database for consistent data across dev and production
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
@@ -251,7 +249,17 @@ export const dataStore = {
         console.warn('[Supabase Categories] Read error:', err);
       }
     }
-    return getStored<Category[]>(STORAGE_KEYS.CATEGORIES, []);
+
+    // 2. Try server API as fallback
+    const serverCats = await api.get<Category[]>('/api/categories');
+    if (serverCats && Array.isArray(serverCats) && serverCats.length > 0) {
+      setStored(STORAGE_KEYS.CATEGORIES, serverCats);
+      return serverCats;
+    }
+
+    // 3. Fallback to localStorage or INITIAL_CATEGORIES
+    const local = getStored<Category[]>(STORAGE_KEYS.CATEGORIES, []);
+    return local.length > 0 ? local : INITIAL_CATEGORIES;
   },
 
   saveCategory: async (category: Category): Promise<Category> => {
@@ -335,16 +343,38 @@ export const dataStore = {
   // PRODUCTS
   // -------------------------------------------------------------
   getProducts: async (): Promise<Product[]> => {
-    // 1. Try server API first
-    const serverProds = await api.get<Product[]>('/api/products');
-    if (serverProds && Array.isArray(serverProds)) {
-      setStored(STORAGE_KEYS.PRODUCTS, serverProds);
-      return serverProds;
-    }
-
     const localProds = getStored<Product[]>(STORAGE_KEYS.PRODUCTS, []);
     const localMap = new Map(localProds.map((p) => [p.slug, p]));
+    const initialMap = new Map(INITIAL_PRODUCTS.map((p) => [p.slug, p]));
 
+    const getProductFallback = (row: any): Product | undefined => {
+      if (localMap.has(row.slug)) return localMap.get(row.slug);
+      if (initialMap.has(row.slug)) return initialMap.get(row.slug);
+      const exact = INITIAL_PRODUCTS.find(p => p.slug === row.slug || p.id === row.id);
+      if (exact) return exact;
+
+      const norm = (row.name || '').toLowerCase();
+      const slug = (row.slug || '').toLowerCase();
+
+      if (slug.includes('cenoura') || norm.includes('cenoura')) {
+        return INITIAL_PRODUCTS.find(p => p.slug.includes('cenoura'));
+      }
+      if (slug.includes('croissant') || norm.includes('croissant')) {
+        return INITIAL_PRODUCTS.find(p => p.slug.includes('croissant'));
+      }
+      if (slug.includes('sourdough') || norm.includes('sourdough') || norm.includes('fermentação') || norm.includes('campagne')) {
+        return INITIAL_PRODUCTS.find(p => p.slug.includes('sourdough') || p.slug.includes('campagne'));
+      }
+      if (slug.includes('nutella') || norm.includes('nutella')) {
+        return INITIAL_PRODUCTS.find(p => p.slug.includes('nutella'));
+      }
+      if (slug.includes('cafe') || norm.includes('café') || norm.includes('cafe')) {
+        return INITIAL_PRODUCTS.find(p => p.slug.includes('cafe') || p.slug.includes('cappuccino'));
+      }
+      return INITIAL_PRODUCTS.find(p => norm.includes(p.name.toLowerCase().slice(0, 6)));
+    };
+
+    // 1. Prioritize live Supabase database for consistent data across dev and production
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
@@ -355,24 +385,25 @@ export const dataStore = {
 
         if (!error && data && data.length > 0) {
           const mapped: Product[] = data.map((row: any) => {
-            const local = localMap.get(row.slug);
+            const fallback = getProductFallback(row);
             return {
               id: row.id,
-              category_id: row.category_id || local?.category_id || '',
+              category_id: row.category_id || fallback?.category_id || '',
               name: row.name,
               slug: row.slug,
-              description: row.description || local?.description || '',
-              base_price: Number(row.price ?? row.base_price ?? 0),
-              promotional_price: row.promotional_price ? Number(row.promotional_price) : null,
-              unit: row.unit || 'unidade',
-              is_active: row.is_active ?? true,
-              is_featured: local?.is_featured ?? false,
-              stock_quantity: local?.stock_quantity ?? 15,
-              track_stock: local?.track_stock ?? true,
-              image_url: local?.image_url || 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=600&auto=format&fit=crop&q=80',
-              allergens: local?.allergens || ['Glúten'],
-              tags: local?.tags || [],
-              schedule_config: local?.schedule_config || {
+              description: row.description || fallback?.description || '',
+              base_price: Number(row.price ?? row.base_price ?? fallback?.base_price ?? 0),
+              promotional_price: row.promotional_price ? Number(row.promotional_price) : (fallback?.promotional_price ?? null),
+              unit: row.unit || fallback?.unit || 'unidade',
+              is_active: row.is_active ?? row.active ?? true,
+              is_featured: fallback?.is_featured ?? false,
+              stock_quantity: fallback?.stock_quantity ?? 15,
+              track_stock: fallback?.track_stock ?? true,
+              image_url: row.image_url || fallback?.image_url || 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=600&auto=format&fit=crop&q=80',
+              allergens: fallback?.allergens || ['Glúten'],
+              tags: fallback?.tags || [],
+              options: fallback?.options || [],
+              schedule_config: fallback?.schedule_config || {
                 is_scheduled_only: true,
                 available_days: [2, 4, 6],
                 batch_limit: 15,
@@ -380,8 +411,8 @@ export const dataStore = {
                 min_lead_days: 1,
                 delivery_window: '14:00 - 18:00',
               },
-              created_at: row.created_at || local?.created_at || new Date().toISOString(),
-              updated_at: row.updated_at || local?.updated_at || new Date().toISOString(),
+              created_at: row.created_at || fallback?.created_at || new Date().toISOString(),
+              updated_at: row.updated_at || fallback?.updated_at || new Date().toISOString(),
             };
           });
           setStored(STORAGE_KEYS.PRODUCTS, mapped);
@@ -391,7 +422,16 @@ export const dataStore = {
         console.warn('[Supabase Products] Read error:', err);
       }
     }
-    return localProds;
+
+    // 2. Try server API as fallback
+    const serverProds = await api.get<Product[]>('/api/products');
+    if (serverProds && Array.isArray(serverProds) && serverProds.length > 0) {
+      setStored(STORAGE_KEYS.PRODUCTS, serverProds);
+      return serverProds;
+    }
+
+    // 3. Fallback to localStorage or INITIAL_PRODUCTS
+    return localProds.length > 0 ? localProds : INITIAL_PRODUCTS;
   },
 
   saveProduct: async (product: Product): Promise<Product> => {
