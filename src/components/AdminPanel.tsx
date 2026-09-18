@@ -120,21 +120,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   if (!isOpen) return null;
 
-  // Handle CEP management
+  // Handle Delivery Location / Frete management
   const handleAddCep = async () => {
-    if (!newCep.cep.trim() || !newCep.label.trim()) return;
+    if (!newCep.label.trim()) return;
     const rule: DeliveryCepRule = {
-      id: `cep-${Date.now()}`,
-      cep: newCep.cep.trim(),
+      id: `loc-${Date.now()}`,
       label: newCep.label.trim(),
       fee: Number(newCep.fee) || 0,
+      cep: newCep.cep?.trim() || '36830-000',
       estimated_minutes: Number(newCep.estimated_minutes) || 30,
       active: true,
     };
     const updated = [...ceps, rule];
     setCeps(updated);
     await dataStore.saveDeliveryCeps(updated);
-    setNewCep({ cep: '', label: '', fee: 10, estimated_minutes: 35 });
+    setNewCep({ cep: '', label: '', fee: 5, estimated_minutes: 35 });
     await reloadData();
     onOrderUpdated();
   };
@@ -390,7 +390,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               }`}
             >
               <MapPin className="w-3.5 h-3.5" />
-              <span>CEPs & Frete da Rota ({ceps.length})</span>
+              <span>Locais & Frete ({ceps.length})</span>
             </button>
 
             <button
@@ -892,56 +892,47 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         )}
 
         {/* ------------------------------------------------------------- */}
-        {/* TAB 4: CEPS & FRETE DA ROTA */}
+        {/* TAB 4: LOCAIS & TAXAS DE FRETE */}
         {/* ------------------------------------------------------------- */}
         {activeTab === 'ceps' && (
           <div className="space-y-6">
             <div className="flex justify-between items-center">
               <div>
                 <h2 className="font-serif font-bold text-xl text-[#3A2E1F]">
-                  CEPs Atendidos & Taxas Individuais de Frete
+                  Locais Atendidos & Taxas de Entrega
                 </h2>
                 <p className="text-xs text-[#7E6C58]">
-                  Defina os CEPs atendidos pela entrega própria da padaria e a taxa de frete correspondente.
+                  Cadastre cada local ou bairro específico e sua respectiva taxa de frete (ex: Espera Feliz (Centro) - R$ 3,00, Espera Feliz (Zona Rural) - R$ 5,00). O cliente escolhe diretamente pela lista.
                 </p>
               </div>
             </div>
 
-            {/* Form to add CEP rule */}
+            {/* Form to add Delivery Location */}
             <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-5 shadow-2xs space-y-4">
               <h3 className="font-bold text-sm text-[#3A2E1F] flex items-center gap-2">
                 <Plus className="w-4 h-4 text-[#B8623F]" />
-                <span>Cadastrar Novo CEP de Entrega</span>
+                <span>Cadastrar Novo Local de Entrega</span>
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
-                <div>
-                  <label className="block font-semibold text-[#554432] mb-1">CEP (ou prefixo)</label>
+                <div className="sm:col-span-2">
+                  <label className="block font-semibold text-[#554432] mb-1">Nome do Local / Região / Bairro *</label>
                   <input
                     type="text"
-                    placeholder="Ex: 36830-000 ou 36830"
-                    value={newCep.cep}
-                    onChange={(e) => setNewCep({ ...newCep, cep: e.target.value })}
-                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0] focus:bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-[#554432] mb-1">Bairro / Rota de Entrega</label>
-                  <input
-                    type="text"
-                    placeholder="Ex: Centro / Espera Feliz"
+                    placeholder="Ex: Espera Feliz (Centro) ou Espera Feliz (Zona Rural)"
                     value={newCep.label}
                     onChange={(e) => setNewCep({ ...newCep, label: e.target.value })}
-                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0] focus:bg-white"
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0] focus:bg-white text-[#3A2E1F]"
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold text-[#554432] mb-1">Taxa de Frete (R$)</label>
+                  <label className="block font-semibold text-[#554432] mb-1">Taxa de Frete (R$) *</label>
                   <input
                     type="number"
                     step="0.5"
+                    placeholder="Ex: 3.00 ou 5.00"
                     value={newCep.fee}
                     onChange={(e) => setNewCep({ ...newCep, fee: Number(e.target.value) })}
-                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0] focus:bg-white"
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0] focus:bg-white text-[#3A2E1F]"
                   />
                 </div>
                 <div>
@@ -952,26 +943,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     onChange={(e) =>
                       setNewCep({ ...newCep, estimated_minutes: Number(e.target.value) })
                     }
-                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0] focus:bg-white"
+                    className="w-full p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-[#FAF7F0] focus:bg-white text-[#3A2E1F]"
                   />
                 </div>
               </div>
               <button
                 onClick={handleAddCep}
-                className="px-4 py-2 bg-[#B8623F] hover:bg-[#994E30] text-white rounded-xl text-xs font-semibold cursor-pointer shadow-xs"
+                disabled={!newCep.label.trim()}
+                className="px-4 py-2.5 bg-[#B8623F] hover:bg-[#994E30] disabled:opacity-50 text-white rounded-xl text-xs font-semibold cursor-pointer shadow-xs transition-all"
               >
-                Cadastrar Rota de CEP
+                Cadastrar Local de Entrega
               </button>
             </div>
 
-            {/* List of CEPs */}
+            {/* List of Delivery Locations */}
             <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl overflow-hidden shadow-2xs">
+              <div className="p-4 border-b border-[#3A2E1F]/10 flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-sm text-[#3A2E1F]">Locais Cadastrados para Seleção ({ceps.length})</h3>
+                  <p className="text-[11px] text-[#7E6C58]">Estes locais aparecem ordenados para o cliente escolher na cesta de compras.</p>
+                </div>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-[#FAF7F0] border-b border-[#3A2E1F]/10 text-[#7E6C58] uppercase text-[10px] font-bold">
                     <tr>
-                      <th className="p-3">CEP Atendido</th>
-                      <th className="p-3">Região / Bairro</th>
+                      <th className="p-3">Local / Região de Destino</th>
                       <th className="p-3">Taxa de Frete</th>
                       <th className="p-3">Tempo Estimado</th>
                       <th className="p-3">Status</th>
@@ -981,9 +978,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <tbody className="divide-y divide-[#3A2E1F]/10">
                     {ceps.map((rule) => (
                       <tr key={rule.id} className="hover:bg-[#FAF7F0]/50">
-                        <td className="p-3 font-mono font-bold text-[#3A2E1F]">{rule.cep}</td>
-                        <td className="p-3 text-[#554432]">{rule.label || '-'}</td>
-                        <td className="p-3 font-bold text-[#B8623F]">R$ {rule.fee.toFixed(2)}</td>
+                        <td className="p-3 font-semibold text-[#3A2E1F]">
+                          <span className="flex items-center gap-1.5">
+                            <MapPin className="w-3.5 h-3.5 text-[#B8623F] shrink-0" />
+                            {rule.label || rule.cep}
+                          </span>
+                        </td>
+                        <td className="p-3 font-bold text-[#B8623F]">
+                          R$ {rule.fee.toFixed(2).replace('.', ',')}
+                        </td>
                         <td className="p-3 text-[#7E6C58]">{rule.estimated_minutes || 30} min</td>
                         <td className="p-3">
                           <button
@@ -1001,7 +1004,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           <button
                             onClick={() => handleDeleteCep(rule.id)}
                             className="p-1 text-gray-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
-                            title="Remover CEP"
+                            title="Remover Local"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -1307,12 +1310,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             {/* SEÇÃO 4: HORÁRIOS & FORNADAS */}
             <div className="space-y-4">
               <h3 className="font-serif font-bold text-base text-[#3A2E1F] border-b border-[#3A2E1F]/10 pb-2">
-                4. Fornadas & Horários de Funcionamento
+                4. Fornadas & Programação de Entregas
               </h3>
               <div className="space-y-3 text-xs">
+                {/* FRASE DE ENTREGAS NO RODAPÉ */}
+                <div className="bg-[#FAF7F0] p-3 rounded-xl border border-[#B8623F]/25 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="block font-bold text-[#3A2E1F]">
+                      Frase de Entregas (Exibida no Rodapé)
+                    </label>
+                    <span className="text-[10px] uppercase font-bold text-[#B8623F] bg-[#B8623F]/10 px-2 py-0.5 rounded-full">
+                      Rodapé
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    id="input-admin-delivery-schedule"
+                    value={storeSettings.delivery_schedule_text ?? 'Entregas nas terças e sextas'}
+                    onChange={(e) =>
+                      setStoreSettings({ ...storeSettings, delivery_schedule_text: e.target.value })
+                    }
+                    placeholder="Entregas nas terças e sextas"
+                    className="w-full p-2.5 rounded-lg border border-[#3A2E1F]/20 bg-white text-[#3A2E1F] font-semibold text-xs shadow-xs focus:outline-none focus:ring-2 focus:ring-[#B8623F]"
+                  />
+                  <p className="text-[11px] text-[#7E6C58]">
+                    Esta frase é exibida de forma destacada no rodapé da loja, substituindo a lista diária. Padrão: <span className="font-semibold text-[#3A2E1F]">Entregas nas terças e sextas</span>.
+                  </p>
+                </div>
+
                 <div>
                   <label className="block font-semibold text-[#554432] mb-1">
-                    Texto Informativo de Fornada Fresca (Exibido no Rodapé e Cabeçalho)
+                    Texto Informativo de Fornada Fresca (Exibido no Cabeçalho e Avisos)
                   </label>
                   <input
                     type="text"

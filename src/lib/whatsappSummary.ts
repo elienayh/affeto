@@ -104,39 +104,6 @@ export const saveCustomerByPhone = (customer: CustomerData): void => {
 };
 
 /**
- * Async lookup for customer by phone: searches local cache, in-memory orders, and backend database
- */
-export const lookupCustomerByPhone = async (
-  phoneInput: string,
-  orders: Order[] = []
-): Promise<CustomerData | null> => {
-  const digits = cleanPhoneDigits(phoneInput);
-  if (digits.length < 8) return null;
-
-  // 1. Search in local cache & orders first (instant response)
-  const localMatch = findCustomerByPhone(phoneInput, orders);
-  if (localMatch && localMatch.name) {
-    return localMatch;
-  }
-
-  // 2. Query backend server database (/api/customers/lookup)
-  try {
-    const response = await fetch(`/api/customers/lookup?phone=${encodeURIComponent(digits)}`);
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.found && data.customer) {
-        saveCustomerByPhone(data.customer);
-        return data.customer;
-      }
-    }
-  } catch (err) {
-    console.warn('[Customer Lookup] Server fetch error:', err);
-  }
-
-  return null;
-};
-
-/**
  * Generate a complete, beautifully structured WhatsApp order summary for the bakery
  */
 export const generateWhatsAppOrderSummary = (order: Order): string => {
@@ -149,15 +116,19 @@ export const generateWhatsAppOrderSummary = (order: Order): string => {
       ? 'Cartão de Crédito'
       : 'A Combinar';
 
+  const locationName =
+    (order as any).delivery_location_name ||
+    (order.delivery_type === 'DELIVERY' && order.address?.neighborhood
+      ? order.address.neighborhood
+      : '');
+
   const deliveryText =
     order.delivery_type === 'DELIVERY'
-      ? `🛵 *Entrega em Domicílio*\n📍 *Endereço:* ${order.address?.street || ''}, ${
+      ? `🛵 *Entrega em Domicílio* ${locationName ? `(${locationName})` : ''}\n📍 *Endereço:* ${order.address?.street || ''}, ${
           order.address?.number || ''
-        } ${order.address?.complement ? `(${order.address.complement})` : ''}\n🏘️ *Bairro:* ${
+        } ${order.address?.complement ? `(${order.address.complement})` : ''}\n🏘️ *Bairro/Local:* ${
           order.address?.neighborhood || ''
-        } - ${order.address?.city || 'Espera Feliz'}/${order.address?.state || 'MG'}\n📮 *CEP:* ${
-          order.address?.zip_code || ''
-        }`
+        } - ${order.address?.city || 'Espera Feliz'}/${order.address?.state || 'MG'}`
       : `🏪 *Retirada no Balcão*\n📍 *Local:* Espera Feliz-MG (Affeto Pães)`;
 
   const itemsList = (order.items || [])

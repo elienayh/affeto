@@ -11,26 +11,46 @@ import {
 } from '../types';
 
 export function matchDeliveryCep(
-  rawCep: string,
+  rawCepOrLocation: string,
   cepRules: DeliveryCepRule[] = []
 ): DeliveryCepRule | null {
-  if (!rawCep) return null;
-  const digits = rawCep.replace(/\D/g, '');
-  if (!digits) return null;
+  if (!rawCepOrLocation) return null;
+  const trimmed = rawCepOrLocation.trim();
 
-  // 1. Procura correspondência exata de 8 dígitos
-  const exact = cepRules.find(
-    (r) => r.active && r.cep.replace(/\D/g, '') === digits
+  // 1. Procura correspondência direta por ID ou Nome/Label da Localidade
+  const direct = cepRules.find(
+    (r) =>
+      r.active &&
+      (r.id === trimmed ||
+        r.label.toLowerCase() === trimmed.toLowerCase() ||
+        (r.cep && r.cep === trimmed))
   );
-  if (exact) return exact;
+  if (direct) return direct;
 
-  // 2. Procura por prefixo de 5 dígitos (ex: 01419 cobre a região de 01419-xxx)
-  if (digits.length >= 5) {
-    const prefix = digits.substring(0, 5);
-    const prefixMatch = cepRules.find(
-      (r) => r.active && r.cep.replace(/\D/g, '').startsWith(prefix)
+  // 1.1 Procura parcial por nome do local/bairro
+  const partial = cepRules.find(
+    (r) =>
+      r.active &&
+      (r.label.toLowerCase().includes(trimmed.toLowerCase()) ||
+        trimmed.toLowerCase().includes(r.label.toLowerCase()))
+  );
+  if (partial) return partial;
+
+  // 2. Se for número de CEP, busca por dígitos ou prefixo
+  const digits = trimmed.replace(/\D/g, '');
+  if (digits) {
+    const exact = cepRules.find(
+      (r) => r.active && r.cep && r.cep.replace(/\D/g, '') === digits
     );
-    if (prefixMatch) return prefixMatch;
+    if (exact) return exact;
+
+    if (digits.length >= 5) {
+      const prefix = digits.substring(0, 5);
+      const prefixMatch = cepRules.find(
+        (r) => r.active && r.cep && r.cep.replace(/\D/g, '').startsWith(prefix)
+      );
+      if (prefixMatch) return prefixMatch;
+    }
   }
 
   return null;
@@ -48,6 +68,7 @@ export interface PricingEngineInput {
   availableProducts: Product[];
   delivery_type: DeliveryType;
   delivery_zone_id?: string;
+  delivery_location_id?: string;
   availableZones: DeliveryZone[];
   zip_code?: string;
   availableCepRules?: DeliveryCepRule[];
@@ -191,8 +212,9 @@ export function calculateOrderPricing(input: PricingEngineInput): {
   let matchedCepRule: DeliveryCepRule | undefined = undefined;
 
   if (delivery_type === 'DELIVERY') {
-    if (input.zip_code) {
-      const match = matchDeliveryCep(input.zip_code, input.availableCepRules || []);
+    const locKey = input.delivery_location_id || input.zip_code;
+    if (locKey) {
+      const match = matchDeliveryCep(locKey, input.availableCepRules || []);
       if (match) {
         deliveryFee = match.fee;
         isCepAllowed = true;
@@ -203,9 +225,14 @@ export function calculateOrderPricing(input: PricingEngineInput): {
       }
     } else if (delivery_zone_id) {
       const zone = availableZones.find((z) => z.id === delivery_zone_id && z.active);
-      deliveryFee = zone ? zone.fee : 10.0;
+      deliveryFee = zone ? zone.fee : 5.0;
+      isCepAllowed = true;
+    } else if (input.availableCepRules && input.availableCepRules.length > 0) {
+      deliveryFee = 0;
+      isCepAllowed = false;
     } else {
-      deliveryFee = 10.0; // Default standard zone
+      deliveryFee = 5.0; // Default standard zone
+      isCepAllowed = true;
     }
   } else {
     // PICKUP has zero delivery fee
@@ -279,11 +306,12 @@ export const pricingEngine = {
     deliveryType: DeliveryType;
     deliveryZone?: DeliveryZone;
     zipCode?: string;
+    deliveryLocationId?: string;
     deliveryCepRules?: DeliveryCepRule[];
     coupon?: Coupon;
     storeSettings?: StoreSettings;
   }): PricingBreakdown => {
-    const { items, deliveryType, deliveryZone, zipCode, deliveryCepRules, coupon, storeSettings } = params;
+    const { items, deliveryType, deliveryZone, zipCode, deliveryLocationId, deliveryCepRules, coupon, storeSettings } = params;
 
     let subtotal = 0;
     let itemsCount = 0;
@@ -299,8 +327,9 @@ export const pricingEngine = {
     let matchedCepRule: DeliveryCepRule | undefined = undefined;
 
     if (deliveryType === 'DELIVERY') {
-      if (zipCode && zipCode.trim().length > 0) {
-        const match = matchDeliveryCep(zipCode, deliveryCepRules || []);
+      const locKey = deliveryLocationId || zipCode;
+      if (locKey && locKey.trim().length > 0) {
+        const match = matchDeliveryCep(locKey, deliveryCepRules || []);
         if (match) {
           deliveryFee = match.fee;
           isCepAllowed = true;
@@ -311,8 +340,14 @@ export const pricingEngine = {
         }
       } else if (deliveryZone) {
         deliveryFee = deliveryZone.fee;
+        isCepAllowed = true;
+      } else if (deliveryCepRules && deliveryCepRules.length > 0) {
+        // Bloqueado até o cliente selecionar a localidade
+        deliveryFee = 0;
+        isCepAllowed = false;
       } else {
-        deliveryFee = 10.0;
+        deliveryFee = 5.0;
+        isCepAllowed = true;
       }
 
       // Free shipping threshold check if defined (only if cep is allowed or zone exists)
@@ -370,6 +405,7 @@ export const pricingEngine = {
       coupon_id: couponId,
       delivery_type: deliveryType,
       delivery_fee: Math.round(deliveryFee * 100) / 100,
+      delivery_location_name: matchedCepRule?.label || deliveryZone?.name,
       zip_code: zipCode,
       is_cep_allowed: isCepAllowed,
       cep_rule_matched: matchedCepRule,

@@ -176,17 +176,17 @@ export interface Coupon {
 export interface DeliveryZone {
   id: string;
   name: string;
-  neighborhood: string;
+  neighborhood?: string;
   fee: number;
-  estimated_minutes: number;
+  estimated_minutes?: number;
   active: boolean;
 }
 
 export interface DeliveryCepRule {
   id: string;
-  cep: string; // Ex: '01419-002' ou '01419' (5 dígitos)
-  label?: string; // Ex: 'Jardins / Cerqueira César'
-  fee: number; // Preço exclusivo para este CEP
+  label: string; // Ex: 'Espera Feliz (Centro)' ou 'Espera Feliz (Zona Rural)'
+  fee: number; // Preço do frete para esta localidade
+  cep?: string; // Opcional para compatibilidade (ex: '36830-000')
   estimated_minutes?: number;
   active: boolean;
 }
@@ -198,6 +198,7 @@ export interface PricingBreakdown {
   coupon_id?: string;
   delivery_type: DeliveryType;
   delivery_fee: number;
+  delivery_location_name?: string;
   zip_code?: string;
   is_cep_allowed?: boolean;
   cep_rule_matched?: DeliveryCepRule;
@@ -295,6 +296,7 @@ export interface StoreSettings {
   lead_time_minutes: number;
   instagram?: string;
   fresh_batch_hours?: string;
+  delivery_schedule_text?: string;
 }
 
 // Future Stubs Types (Section 4 of prompt)

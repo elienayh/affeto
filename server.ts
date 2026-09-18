@@ -5,11 +5,20 @@ import { calculateOrderPricing } from './src/lib/pricingEngine';
 import { serverStorage } from './src/server/storage';
 import {
   syncStoreSettingsToSupabase,
+  getStoreSettingsFromSupabase,
+  uploadAssetToSupabaseStorage,
   syncProductToSupabase,
   deleteProductFromSupabase,
   syncCategoryToSupabase,
   deleteCategoryFromSupabase,
+  syncDeliveryCepsToSupabase,
+  getDeliveryCepsFromSupabase,
 } from './src/server/supabaseServer';
+import {
+  createRealMercadoPagoPayment,
+  getRealMercadoPagoPayment,
+  isMercadoPagoConfigured,
+} from './src/server/mercadopago';
 
 const currentDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
 
@@ -55,25 +64,39 @@ async function startServer() {
   // -----------------------------------------------------------------
   // STORE SETTINGS & LOGO / ADDRESS PERSISTENCE
   // -----------------------------------------------------------------
-  const handleGetSettings = (req: express.Request, res: express.Response) => {
+  const handleGetSettings = async (req: express.Request, res: express.Response) => {
     try {
+      // 1. Fetch live from Supabase stores table for instantaneous cross-device consistency
+      const supabaseSettings = await getStoreSettingsFromSupabase();
+      if (supabaseSettings) {
+        serverStorage.updateSettings(supabaseSettings);
+        res.json(supabaseSettings);
+        return;
+      }
       const settings = serverStorage.getSettings();
       res.json(settings);
     } catch (err: any) {
       console.error('[API Settings Get Error]:', err);
-      res.status(500).json({ error: 'Erro ao carregar configurações' });
+      res.json(serverStorage.getSettings());
     }
   };
 
   const handleUpdateSettings = async (req: express.Request, res: express.Response) => {
     try {
-      const updated = serverStorage.updateSettings(req.body);
+      let payload = { ...req.body };
+      // If logo is base64, upload permanently to Supabase Storage
+      if (payload.logo_url && payload.logo_url.startsWith('data:image/')) {
+        const permanentCdnUrl = await uploadAssetToSupabaseStorage(payload.logo_url, 'logos', 'affeto_logo');
+        if (permanentCdnUrl) {
+          payload.logo_url = permanentCdnUrl;
+        }
+      }
+
+      const updated = serverStorage.updateSettings(payload);
       // Dual persistence: sync immediately to Supabase database so all devices and instances see it!
-      syncStoreSettingsToSupabase(updated).catch((err) => {
-        console.warn('[Server] Supabase store sync warning:', err);
-      });
-      console.info('[API Settings Updated]: Logo and address persisted in server and queued for Supabase');
-      res.json(updated);
+      const synced = await syncStoreSettingsToSupabase(updated);
+      console.info('[API Settings Updated]: Logo and settings saved in server and Supabase. Logo URL:', synced.logo_url);
+      res.json(synced);
     } catch (err: any) {
       console.error('[API Settings Update Error]:', err);
       res.status(500).json({ error: 'Erro ao salvar configurações no servidor' });
@@ -86,6 +109,24 @@ async function startServer() {
   app.post('/api/store-settings', handleUpdateSettings);
   app.put('/api/settings', handleUpdateSettings);
   app.post('/api/settings', handleUpdateSettings);
+
+  // Dedicated asset upload endpoint to Supabase Storage (affeto-assets bucket)
+  app.post('/api/upload', async (req: express.Request, res: express.Response) => {
+    try {
+      const { image, folder = 'general', prefix = 'asset' } = req.body;
+      if (!image) {
+        return res.status(400).json({ error: 'Nenhuma imagem fornecida' });
+      }
+      const url = await uploadAssetToSupabaseStorage(image, folder, prefix);
+      if (url) {
+        return res.json({ url });
+      }
+      return res.status(500).json({ error: 'Falha no upload para o Supabase Storage' });
+    } catch (err: any) {
+      console.error('[API Upload Error]:', err);
+      return res.status(500).json({ error: err?.message || 'Erro no upload' });
+    }
+  });
 
   // -----------------------------------------------------------------
   // PRODUCTS PERSISTENCE
@@ -219,17 +260,26 @@ async function startServer() {
     }
   });
 
-  app.get('/api/delivery-ceps', (req, res) => {
+  app.get('/api/delivery-ceps', async (req, res) => {
     try {
+      const fromSupabase = await getDeliveryCepsFromSupabase();
+      if (fromSupabase && fromSupabase.length > 0) {
+        res.json(fromSupabase);
+        return;
+      }
       res.json(serverStorage.getDeliveryCeps());
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao carregar regras de CEP' });
+      res.json(serverStorage.getDeliveryCeps());
     }
   });
 
-  app.post('/api/delivery-ceps', (req, res) => {
+  app.post('/api/delivery-ceps', async (req, res) => {
     try {
-      res.json(serverStorage.saveDeliveryCep(req.body));
+      const saved = serverStorage.saveDeliveryCep(req.body);
+      syncDeliveryCepsToSupabase(serverStorage.getDeliveryCeps()).catch((err) => {
+        console.warn('[Server] Supabase delivery ceps sync warning:', err);
+      });
+      res.json(saved);
     } catch (err) {
       res.status(500).json({ error: 'Erro ao salvar regra de CEP' });
     }
@@ -372,16 +422,140 @@ async function startServer() {
     }
   });
 
-  // 3. Mercado Pago Webhook Handler (Section 5.4)
+  // 3. Mercado Pago Real Payment Integration
+  app.get('/api/payments/config', (req, res) => {
+    res.json({
+      mercadopago_configured: isMercadoPagoConfigured(),
+      environment: 'production',
+      supported_methods: ['PIX', 'CREDIT_CARD'],
+    });
+  });
+
+  app.post('/api/payments/create', async (req, res) => {
+    try {
+      const { order_id, method, payer_cpf, payer_email, payer_name } = req.body;
+      if (!order_id) {
+        return res.status(400).json({ error: 'order_id é obrigatório' });
+      }
+
+      const order = serverStorage.getOrder(order_id);
+      if (!order) {
+        return res.status(404).json({ error: 'Pedido não encontrado para gerar pagamento' });
+      }
+
+      const storeSettings = serverStorage.getSettings();
+      const appUrl = `${req.protocol}://${req.get('host')}`;
+
+      const paymentRecord = await createRealMercadoPagoPayment(order, method || 'PIX', {
+        payer_cpf,
+        payer_email,
+        payer_name,
+        app_url: appUrl,
+        store_pix_key: storeSettings?.pix_key,
+      });
+
+      serverStorage.setOrderPayment(order.id, paymentRecord);
+
+      if (paymentRecord.status === 'APPROVED') {
+        serverStorage.updatePaymentStatus(order.id, 'APPROVED', paymentRecord.external_id);
+      }
+
+      return res.json({
+        success: true,
+        payment: paymentRecord,
+        order: serverStorage.getOrder(order.id),
+        is_mercadopago_real: isMercadoPagoConfigured(),
+      });
+    } catch (err: any) {
+      console.error('[API Payments Create Error]:', err);
+      return res.status(500).json({ error: err?.message || 'Erro ao processar pagamento' });
+    }
+  });
+
+  app.get('/api/payments/:orderId/status', async (req, res) => {
+    try {
+      const order = serverStorage.getOrder(req.params.orderId);
+      if (!order) {
+        return res.status(404).json({ error: 'Pedido não encontrado' });
+      }
+
+      let paymentRecord = order.payment;
+
+      // Se o pedido ainda está pendente e possui ID numérico real do Mercado Pago, consulta status na API do Mercado Pago
+      if (
+        order.payment_status === 'PENDING' &&
+        paymentRecord?.external_id &&
+        !paymentRecord.external_id.startsWith('affeto_') &&
+        isMercadoPagoConfigured()
+      ) {
+        try {
+          const mpData = await getRealMercadoPagoPayment(paymentRecord.external_id);
+          if (mpData) {
+            if (mpData.status === 'approved') {
+              serverStorage.updatePaymentStatus(order.id, 'APPROVED', String(mpData.id));
+              serverStorage.updateOrderStatus(
+                order.id,
+                'CONFIRMED',
+                'MERCADO_PAGO',
+                `Pagamento aprovado confirmado pelo Mercado Pago [ID: ${mpData.id}]`
+              );
+            } else if (mpData.status === 'rejected' || mpData.status === 'cancelled') {
+              serverStorage.updatePaymentStatus(order.id, 'REJECTED', String(mpData.id));
+            }
+          }
+        } catch (mpErr) {
+          console.warn('[MercadoPago Status Check Warning]:', mpErr);
+        }
+      }
+
+      const freshOrder = serverStorage.getOrder(req.params.orderId) || order;
+      return res.json({
+        order_id: freshOrder.id,
+        payment_status: freshOrder.payment_status,
+        order_status: freshOrder.status,
+        is_approved: freshOrder.payment_status === 'APPROVED' || freshOrder.status !== 'PENDING_PAYMENT',
+        payment: freshOrder.payment,
+      });
+    } catch (err: any) {
+      console.error('[Payment Status Error]:', err);
+      return res.status(500).json({ error: 'Erro ao verificar status do pagamento' });
+    }
+  });
+
+  // Mercado Pago Real Webhook Handler
   app.post('/api/webhooks/mercadopago', async (req, res) => {
     try {
       const payload = req.body;
-      console.info('[Mercado Pago Webhook Received]:', payload);
+      console.info('[Mercado Pago Webhook Received]:', JSON.stringify(payload));
 
-      // In production, validate headers / x-signature if MERCADOPAGO_WEBHOOK_SECRET is set
       const paymentId = payload?.data?.id || req.query['data.id'] || req.query.id;
 
-      // Responda 200 OK imediatamente para o Mercado Pago
+      if (paymentId && isMercadoPagoConfigured()) {
+        try {
+          const mpPayment = await getRealMercadoPagoPayment(String(paymentId));
+          if (mpPayment) {
+            console.info(`[Mercado Pago Webhook] Pagamento ${paymentId}: Status=${mpPayment.status}, Ref=${mpPayment.external_reference}`);
+            const orderId = mpPayment.external_reference;
+            if (orderId) {
+              if (mpPayment.status === 'approved') {
+                serverStorage.updatePaymentStatus(orderId, 'APPROVED', String(paymentId));
+                serverStorage.updateOrderStatus(
+                  orderId,
+                  'CONFIRMED',
+                  'MERCADO_PAGO_WEBHOOK',
+                  `Pagamento aprovado via Webhook Mercado Pago [ID: ${paymentId}]`
+                );
+              } else if (mpPayment.status === 'rejected' || mpPayment.status === 'cancelled') {
+                serverStorage.updatePaymentStatus(orderId, 'REJECTED', String(paymentId));
+              }
+            }
+          }
+        } catch (mpErr) {
+          console.error('[Mercado Pago Webhook Fetch Error]:', mpErr);
+        }
+      }
+
+      // Responde 200 OK imediatamente para o Mercado Pago não reenviar
       return res.status(200).json({
         received: true,
         payment_id: paymentId,
@@ -389,7 +563,7 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error('[Webhook Error]:', err);
-      return res.status(500).json({ error: 'Webhook processing error' });
+      return res.status(200).json({ received: false, error: err?.message });
     }
   });
 

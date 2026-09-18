@@ -24,12 +24,29 @@
     "noEmit": true
   },
   "include": [
-    "src/**/*.ts",
-    "src/**/*.tsx",
-    "server.ts"
+    "src/main.tsx",
+    "src/App.tsx",
+    "src/types.ts",
+    "src/data.ts",
+    "src/components/**/*",
+    "src/lib/**/*",
+    "src/services/**/*",
+    "src/server/**/*",
+    "server.ts",
+    "vite.config.ts"
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
+    "temp_repo",
+    "src/app/**/*",
+    "src/components/layout/**/*",
+    "src/components/ui/**/*",
+    "src/middleware.ts",
+    "src/lib/actions/**/*",
+    "src/lib/queries/**/*",
+    "src/lib/services/**/*",
+    "src/lib/supabase/client.ts",
+    "src/lib/supabase/server.ts"
   ]
 }

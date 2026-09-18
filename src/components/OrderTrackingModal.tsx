@@ -26,9 +26,9 @@ export const OrderTrackingModal: React.FC<OrderTrackingModalProps> = ({
   onClose,
   storePhone = '5532984680513',
 }) => {
-  if (!order) return null;
-
   const [copiedLink, setCopiedLink] = React.useState(false);
+
+  if (!order) return null;
 
   const handleCopyLink = () => {
     const url = `${window.location.origin}?order=${encodeURIComponent(order.code)}`;

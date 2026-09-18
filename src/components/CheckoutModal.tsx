@@ -17,16 +17,17 @@ import {
   Search,
   Layers,
   Flame,
+  Lock,
 } from 'lucide-react';
 import { getNextAvailableBatch } from '../lib/batchScheduler';
 import { matchDeliveryCep } from '../lib/pricingEngine';
 import {
   cleanPhoneDigits,
   findCustomerByPhone,
-  lookupCustomerByPhone,
   formatPhoneMask,
   getWhatsAppOrderUrl,
   saveCustomerByPhone,
+  CustomerData,
   BAKERY_WHATSAPP_NUMBER,
 } from '../lib/whatsappSummary';
 import { orderService } from '../services/orderService';
@@ -57,10 +58,40 @@ interface CheckoutModalProps {
   onOrderCreated: (order: Order, paymentMethod: PaymentMethod) => void;
 }
 
+const lookupCustomerByPhone = async (
+  phoneInput: string,
+  ordersList: Order[] = []
+): Promise<CustomerData | null> => {
+  const digits = cleanPhoneDigits(phoneInput);
+  if (digits.length < 8) return null;
+
+  // 1. Search in local cache & orders first (instant response)
+  const localMatch = findCustomerByPhone(phoneInput, ordersList);
+  if (localMatch && localMatch.name) {
+    return localMatch;
+  }
+
+  // 2. Query backend server database (/api/customers/lookup)
+  try {
+    const response = await fetch(`/api/customers/lookup?phone=${encodeURIComponent(digits)}`);
+    if (response.ok) {
+      const data = await response.json();
+      if (data && data.found && data.customer) {
+        saveCustomerByPhone(data.customer);
+        return data.customer;
+      }
+    }
+  } catch (err) {
+    console.warn('[Customer Lookup] Server fetch error:', err);
+  }
+
+  return null;
+};
+
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   isOpen,
   onClose,
-  items,
+  items = [],
   pricing,
   deliveryType,
   selectedZoneId,
@@ -71,11 +102,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   storeSettings,
   onOrderCreated,
 }) => {
-  if (!isOpen) return null;
-
   // Detect special scheduled products in cart (e.g. Pão com Nutella que só sai Terça e Sexta)
   const scheduledItems = useMemo(() => {
-    return items.filter((it) => it.product.schedule_config?.is_scheduled_only);
+    return (items || []).filter((it) => it?.product?.schedule_config?.is_scheduled_only);
   }, [items]);
 
   // Find earliest available batch date for scheduled items
@@ -100,7 +129,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [autoFillMessage, setAutoFillMessage] = useState<string | null>(null);
 
   const [scheduledDate, setScheduledDate] = useState(() => recommendedDate);
-  const [scheduledTime, setScheduledTime] = useState('08:30 - 10:00 (Fornada Matinal)');
+  const [scheduledTime, setScheduledTime] = useState('12:00 - 18:00 (Período da Tarde)');
 
   // Address
   const [address, setAddress] = useState<CustomerAddress>({
@@ -110,8 +139,32 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     neighborhood: '',
     city: storeSettings?.city || 'Espera Feliz',
     state: storeSettings?.state || 'MG',
-    zip_code: initialCep,
+    zip_code: initialCep || '',
   });
+
+  // Lock body scroll when checkout modal is open
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isOpen]);
+
+  // Keep CEP synchronized with the freight calculation from cart, and keep city/state fixed to the store
+  useEffect(() => {
+    if (initialCep) {
+      setAddress((prev) => ({
+        ...prev,
+        zip_code: initialCep,
+        city: storeSettings?.city || 'Espera Feliz',
+        state: storeSettings?.state || 'MG',
+      }));
+    }
+  }, [initialCep, storeSettings]);
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('PIX');
   const [notes, setNotes] = useState('');
@@ -170,9 +223,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         number: found.address?.number || prev.number,
         complement: found.address?.complement || prev.complement,
         neighborhood: found.address?.neighborhood || prev.neighborhood,
-        city: found.address?.city || prev.city,
-        state: found.address?.state || prev.state,
-        zip_code: found.address?.zip_code || prev.zip_code,
+        // Keep city and state locked to the bakery's local delivery city
+        city: storeSettings?.city || 'Espera Feliz',
+        state: storeSettings?.state || 'MG',
+        // Keep CEP locked to the initialCep used for freight calculations
+        zip_code: initialCep || prev.zip_code || found.address?.zip_code || '',
       }));
     }
     setAutoFillMessage(`✓ Cliente reconhecido: ${found.name}! Dados preenchidos automaticamente.`);
@@ -220,11 +275,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const isDeliveryCepValid = deliveryType === 'PICKUP' || !hasCepRules || !!matchedCepRule;
 
   const availableTimeSlots = [
-    '08:00 - 09:30 (Primeira Fornada da Manhã)',
-    '09:30 - 11:00 (Café & Brunch)',
-    '11:30 - 13:00 (Fornada do Meio-Dia)',
-    '15:00 - 16:30 (Fornada da Tarde)',
-    '16:30 - 18:30 (Chá da Tarde & Happy Hour)',
+    '12:00 - 18:00 (Período da Tarde - Rota Geral)',
+    '12:00 - 15:00 (Início da Tarde)',
+    '15:00 - 18:00 (Fim da Tarde)',
   ];
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -249,17 +302,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
     if (deliveryType === 'DELIVERY') {
       if (!address.street.trim() || !address.number.trim() || !address.neighborhood.trim()) {
-        setErrorMessage('Por favor, preencha o endereço completo de entrega.');
+        setErrorMessage('Por favor, preencha o endereço completo de entrega (rua, número e bairro).');
         return;
       }
-      if (!address.zip_code.trim()) {
-        setErrorMessage('Por favor, informe o CEP para calcular a rota de entrega.');
+      const effectiveLocation = initialCep || address.neighborhood;
+      if (!effectiveLocation.trim()) {
+        setErrorMessage('Por favor, selecione seu local de entrega na cesta.');
         return;
       }
-      // Only enforce CEP match if the store has CEP rules configured
+      // Only enforce destination match if the store has delivery rules configured
       if (hasCepRules && !isDeliveryCepValid) {
         setErrorMessage(
-          'O CEP informado não está na rota de entregas da padaria. Por favor, escolha a opção Retirada no Balcão.'
+          'O destino selecionado não está na rota de entregas da padaria. Por favor, escolha a opção Retirada no Balcão.'
         );
         return;
       }
@@ -268,12 +322,23 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setIsSubmitting(true);
 
     try {
+      const finalAddress: CustomerAddress | undefined =
+        deliveryType === 'DELIVERY'
+          ? {
+              ...address,
+              city: storeSettings?.city || 'Espera Feliz',
+              state: storeSettings?.state || 'MG',
+              neighborhood: address.neighborhood.trim() || matchedCepRule?.label || '',
+              zip_code: matchedCepRule?.cep || initialCep || address.zip_code || '36830-000',
+            }
+          : undefined;
+
       // Save customer details linked to phone number for future instant auto-fill
       saveCustomerByPhone({
         name: customerName.trim(),
         phone: customerPhone.trim(),
         email: customerEmail.trim(),
-        address: deliveryType === 'DELIVERY' ? address : undefined,
+        address: finalAddress,
       });
 
       const orderPayload = {
@@ -282,7 +347,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         customer_phone: customerPhone.trim(),
         delivery_type: deliveryType,
         delivery_zone_id: selectedZoneId,
-        address: deliveryType === 'DELIVERY' ? address : undefined,
+        address: finalAddress,
         scheduled_date: scheduledDate,
         scheduled_time: scheduledTime,
         coupon_code: pricing.coupon_code,
@@ -325,6 +390,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       setIsSubmitting(false);
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
@@ -563,14 +630,58 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           {/* Step 3: Address (If delivery) */}
           {deliveryType === 'DELIVERY' ? (
             <div className="space-y-3 pt-3 border-t border-[#3A2E1F]/10">
-              <h3 className="font-serif font-bold text-sm text-[#3A2E1F] flex items-center gap-2">
-                <MapPin className="w-4 h-4 text-[#B8623F]" />
-                <span>3. Endereço de Entrega</span>
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="font-serif font-bold text-sm text-[#3A2E1F] flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-[#B8623F]" />
+                  <span>3. Endereço de Entrega</span>
+                </h3>
+                <span className="text-[11px] text-[#7E6C58] flex items-center gap-1 font-medium">
+                  <Lock className="w-3 h-3 text-[#7E6C58]" />
+                  Entrega exclusiva em {storeSettings?.city || 'Espera Feliz'} - {storeSettings?.state || 'MG'}
+                </span>
+              </div>
 
+              {/* Destino Definido para o Frete na Cesta */}
+              <div className="p-3 rounded-2xl bg-[#FBF9F5] border border-[#B7A05E]/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-lg bg-[#B8623F]/10 text-[#B8623F] flex items-center justify-center shrink-0">
+                      <Lock className="w-3.5 h-3.5" />
+                    </span>
+                    <div>
+                      <span className="text-xs font-bold text-[#3A2E1F] block">
+                        Destino Selecionado para Entrega:
+                      </span>
+                      <span className="text-[11px] text-[#7E6C58]">
+                        O frete deste pedido foi calculado com base neste local.
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="text-xs font-semibold text-[#B8623F] hover:text-[#994E30] hover:underline cursor-pointer px-2.5 py-1 rounded-lg hover:bg-[#B8623F]/5 transition-colors shrink-0"
+                    title="Voltar à cesta para alterar o local e recalcular o frete"
+                  >
+                    Alterar na cesta
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-[#3A2E1F]/10">
+                  <span className="font-bold text-xs bg-white px-2.5 py-1 rounded-lg border border-[#3A2E1F]/15 text-[#3A2E1F] flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-[#B8623F]" />
+                    {matchedCepRule?.label || initialCep || 'Local Selecionado'}
+                  </span>
+                  <span className="text-xs text-emerald-800 ml-auto font-bold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                    {pricing.delivery_fee === 0 ? 'Frete Grátis' : `Frete: R$ ${pricing.delivery_fee.toFixed(2).replace('.', ',')}`}
+                  </span>
+                </div>
+              </div>
+
+              {/* Formulário de Endereço (Rua, Número, Bairro e Complemento editáveis; Cidade e CEP fixos) */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-[#554432] mb-1">Rua / Avenida *</label>
+                  <label className="block text-xs font-semibold text-[#554432] mb-1">Rua / Logradouro *</label>
                   <input
                     id="checkout-rua"
                     type="text"
@@ -596,24 +707,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-[#554432] mb-1">Complemento</label>
-                  <input
-                    id="checkout-complemento"
-                    type="text"
-                    placeholder="Apto, bloco..."
-                    value={address.complement}
-                    onChange={(e) => setAddress({ ...address, complement: e.target.value })}
-                    className="w-full text-xs p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-white text-[#3A2E1F] focus:ring-2 focus:ring-[#B8623F] focus:outline-none"
-                  />
-                </div>
-
-                <div>
                   <label className="block text-xs font-semibold text-[#554432] mb-1">Bairro *</label>
                   <input
                     id="checkout-bairro"
                     type="text"
                     required
-                    placeholder="Ex: Jardins"
+                    placeholder="Ex: Jardins / Centro"
                     value={address.neighborhood}
                     onChange={(e) => setAddress({ ...address, neighborhood: e.target.value })}
                     className="w-full text-xs p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-white text-[#3A2E1F] focus:ring-2 focus:ring-[#B8623F] focus:outline-none"
@@ -621,52 +720,50 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-[#554432] mb-1">CEP *</label>
+                  <label className="block text-xs font-semibold text-[#554432] mb-1">Complemento</label>
                   <input
-                    id="checkout-cep"
+                    id="checkout-complemento"
                     type="text"
-                    required
-                    placeholder="00000-000"
-                    maxLength={9}
-                    value={address.zip_code}
-                    onChange={(e) => {
-                      let val = e.target.value.replace(/\D/g, '');
-                      if (val.length > 5) {
-                        val = `${val.slice(0, 5)}-${val.slice(5, 8)}`;
-                      }
-                      setAddress({ ...address, zip_code: val });
-                    }}
-                    className="w-full text-xs p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-white text-[#3A2E1F] focus:ring-2 focus:ring-[#B8623F] focus:outline-none font-mono"
+                    placeholder="Apto, bloco, casa..."
+                    value={address.complement}
+                    onChange={(e) => setAddress({ ...address, complement: e.target.value })}
+                    className="w-full text-xs p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-white text-[#3A2E1F] focus:ring-2 focus:ring-[#B8623F] focus:outline-none"
                   />
                 </div>
-              </div>
 
-              {/* CEP Validation Feedback inside Address */}
-              {address.zip_code.replace(/\D/g, '').length >= 5 && (
                 <div>
-                  {matchedCepRule ? (
-                    <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center justify-between">
-                      <span className="flex items-center gap-1.5 font-medium">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span>Região Atendida: <strong>{matchedCepRule.label || address.zip_code}</strong></span>
-                      </span>
-                      <span className="font-bold bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded">
-                        Taxa: R$ {matchedCepRule.fee.toFixed(2).replace('.', ',')}
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
-                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                      <div>
-                        <span className="font-bold block">CEP fora da rota de perecíveis</span>
-                        <span className="text-[11px] text-red-600">
-                          Não realizamos entregas pelo correio por sermos uma padaria artesanal com produtos frescos do dia. Verifique seu CEP ou selecione Retirada no Balcão.
-                        </span>
-                      </div>
-                    </div>
-                  )}
+                  <label className="block text-xs font-semibold text-[#554432] mb-1 flex items-center justify-between">
+                    <span>Cidade / UF (Fixo)</span>
+                  </label>
+                  <div className="w-full text-xs p-2.5 rounded-xl border border-[#3A2E1F]/15 bg-gray-100/90 text-[#554432] font-medium flex items-center justify-between select-none cursor-not-allowed">
+                    <span>{storeSettings?.city || 'Espera Feliz'} - {storeSettings?.state || 'MG'}</span>
+                    <Lock className="w-3.5 h-3.5 text-[#7E6C58]" />
+                  </div>
                 </div>
-              )}
+
+                {/* Caso o CEP não tenha vindo do carrinho (fallback) */}
+                {!initialCep && (
+                  <div className="sm:col-span-3">
+                    <label className="block text-xs font-semibold text-[#554432] mb-1">CEP *</label>
+                    <input
+                      id="checkout-cep"
+                      type="text"
+                      required
+                      placeholder="00000-000"
+                      maxLength={9}
+                      value={address.zip_code}
+                      onChange={(e) => {
+                        let val = e.target.value.replace(/\D/g, '');
+                        if (val.length > 5) {
+                          val = `${val.slice(0, 5)}-${val.slice(5, 8)}`;
+                        }
+                        setAddress({ ...address, zip_code: val });
+                      }}
+                      className="w-full text-xs p-2.5 rounded-xl border border-[#3A2E1F]/20 bg-white text-[#3A2E1F] focus:ring-2 focus:ring-[#B8623F] focus:outline-none font-mono"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <div className="p-3.5 rounded-2xl bg-[#F3ECDD] border border-[#B7A05E]/30 text-xs text-[#554432] space-y-1">

@@ -37,6 +37,16 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   const [selectedBatchDate, setSelectedBatchDate] = useState<string>('');
   const [dateError, setDateError] = useState<string | null>(null);
 
+  // Previne a rolagem da página de fundo quando a visualização do produto estiver aberta
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
+
   // Configuração efetiva de fornadas (cadastrada pelo admin ou padrão artesanal)
   const scheduleConfig = useMemo(() => {
     return getProductEffectiveScheduleConfig(product);

@@ -18,6 +18,7 @@ import {
   DeliveryZone,
   Order,
   OrderStatus,
+  PaymentRecord,
   PaymentStatus,
   ProductionBatch,
   Product,
@@ -157,6 +158,7 @@ class ServerStorage {
       ...this.data.storeSettings,
       ...settings,
       logo_url: logoUrl !== undefined ? logoUrl : this.data.storeSettings.logo_url,
+      delivery_schedule_text: settings.delivery_schedule_text !== undefined ? settings.delivery_schedule_text : (this.data.storeSettings.delivery_schedule_text || 'Entregas nas terças e sextas'),
     };
 
     this.saveDataToFile();
@@ -287,9 +289,11 @@ class ServerStorage {
   }
 
   public saveDeliveryCep(cep: DeliveryCepRule): DeliveryCepRule {
-    const idx = this.data.deliveryCeps.findIndex((c) => c.id === cep.id || c.cep === cep.cep);
+    const idx = this.data.deliveryCeps.findIndex(
+      (c) => c.id === cep.id || (cep.id && c.id === cep.id) || (cep.label && c.label.toLowerCase() === cep.label.toLowerCase())
+    );
     if (idx >= 0) {
-      this.data.deliveryCeps[idx] = cep;
+      this.data.deliveryCeps[idx] = { ...this.data.deliveryCeps[idx], ...cep };
     } else {
       this.data.deliveryCeps.push(cep);
     }
@@ -312,10 +316,25 @@ class ServerStorage {
     return this.data.orders;
   }
 
+  public getOrder(orderId: string): Order | undefined {
+    return this.data.orders.find((o) => o.id === orderId || o.code === orderId);
+  }
+
   public addOrder(order: Order): Order {
     this.data.orders = [order, ...this.data.orders];
     this.saveDataToFile();
     return order;
+  }
+
+  public setOrderPayment(orderId: string, payment: PaymentRecord): Order | null {
+    const idx = this.data.orders.findIndex((o) => o.id === orderId);
+    if (idx === -1) return null;
+
+    this.data.orders[idx].payment = payment;
+    this.data.orders[idx].payment_method = payment.method;
+    this.data.orders[idx].updated_at = new Date().toISOString();
+    this.saveDataToFile();
+    return this.data.orders[idx];
   }
 
   public updateOrderStatus(orderId: string, status: OrderStatus, changedBy: string, notes?: string): Order | null {

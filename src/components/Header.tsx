@@ -93,6 +93,7 @@ export const Header: React.FC<HeaderProps> = ({
                       src={storeSettings.logo_url}
                       alt={storeSettings.name || 'Affeto Pães'}
                       className="w-full h-full rounded-full object-cover group-hover:scale-105 transition-transform"
+                      referrerPolicy="no-referrer"
                     />
                   </div>
                 ) : (

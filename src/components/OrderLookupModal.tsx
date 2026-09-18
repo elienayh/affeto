@@ -14,11 +14,11 @@ export const OrderLookupModal: React.FC<OrderLookupModalProps> = ({
   onClose,
   onSelectOrder,
 }) => {
-  if (!isOpen) return null;
-
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  if (!isOpen) return null;
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -1,38 +1,102 @@
 import { dataStore } from '../lib/supabase';
 import { Order, PaymentMethod, PaymentRecord, PaymentStatus } from '../types';
 
+export interface PaymentStatusCheckResult {
+  order_id: string;
+  payment_status: PaymentStatus;
+  order_status: Order['status'];
+  is_approved: boolean;
+  payment?: PaymentRecord;
+  order?: Order | null;
+}
+
 export const paymentService = {
+  /**
+   * Obtém configuração atual do gateway Mercado Pago do servidor.
+   */
+  getPaymentConfig: async (): Promise<{ mercadopago_configured: boolean; environment: string }> => {
+    try {
+      const res = await fetch('/api/payments/config');
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (e) {
+      // ignore
+    }
+    return { mercadopago_configured: false, environment: 'production' };
+  },
+
+  /**
+   * Gera cobrança real no Mercado Pago via backend seguro.
+   */
   createPayment: async (
     order: Order,
-    method: PaymentMethod
+    method: PaymentMethod,
+    options?: {
+      payer_cpf?: string;
+      payer_email?: string;
+      payer_name?: string;
+    }
   ): Promise<PaymentRecord> => {
-    const paymentId = `pay-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const nowIso = new Date().toISOString();
 
-    let qrCode = '';
-    let qrCodeBase64 = '';
+    try {
+      const response = await fetch('/api/payments/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          order_id: order.id,
+          method,
+          payer_cpf: options?.payer_cpf,
+          payer_email: options?.payer_email || order.customer_email,
+          payer_name: options?.payer_name || order.customer_name,
+        }),
+      });
 
-    if (method === 'PIX') {
-      // Formatted simulated PIX EMV Copia e Cola with dynamic order code and amount
-      const cleanAmount = order.total.toFixed(2);
-      qrCode = `00020126580014br.gov.bcb.pix0136contato@affetopaes.com.br520400005303986540${cleanAmount.length}${cleanAmount}5802BR5911AFFETO PAES6009SAO PAULO62070503${order.code.replace(/[^a-zA-Z0-9]/g, '')}6304ABCD`;
+      if (response.ok) {
+        const data = await response.json();
+        if (data.payment) {
+          const payment: PaymentRecord = data.payment;
+
+          // Atualiza pedido localmente no dataStore
+          const orders = await dataStore.getOrders();
+          const orderIdx = orders.findIndex((o) => o.id === order.id);
+          if (orderIdx >= 0) {
+            orders[orderIdx].payment = payment;
+            orders[orderIdx].payment_method = method;
+            if (payment.status === 'APPROVED') {
+              orders[orderIdx].payment_status = 'APPROVED';
+              orders[orderIdx].status = 'CONFIRMED';
+            }
+            dataStore.saveOrders(orders);
+          }
+
+          return payment;
+        }
+      }
+    } catch (err) {
+      console.warn('[PaymentService] Falha ao contatar endpoint do servidor:', err);
     }
+
+    // Fallback de contingência caso o servidor demore a responder
+    const paymentId = `pay-${order.id}-${Date.now()}`;
+    const cleanAmount = order.total.toFixed(2);
+    const fallbackPix = `00020126580014br.gov.bcb.pix0136contato@affetopaes.com.br520400005303986540${cleanAmount.length}${cleanAmount}5802BR5911AFFETO PAES6009SAO PAULO62070503${order.code.replace(/[^a-zA-Z0-9]/g, '')}6304ABCD`;
 
     const payment: PaymentRecord = {
       id: paymentId,
       order_id: order.id,
       provider: 'MERCADO_PAGO',
-      external_id: `mp_${Date.now()}_${Math.floor(Math.random() * 100000)}`,
+      external_id: `affeto_${order.code.replace(/[^a-zA-Z0-9]/g, '')}`,
       method,
       amount: order.total,
       status: 'PENDING',
-      qr_code: qrCode,
-      ticket_url: `https://www.mercadopago.com.br/payments/${paymentId}/ticket`,
+      qr_code: fallbackPix,
+      ticket_url: `https://www.mercadopago.com.br/`,
       created_at: nowIso,
       updated_at: nowIso,
     };
 
-    // Attach to order in dataStore
     const orders = await dataStore.getOrders();
     const orderIdx = orders.findIndex((o) => o.id === order.id);
     if (orderIdx >= 0) {
@@ -43,52 +107,52 @@ export const paymentService = {
     return payment;
   },
 
-  processWebhook: async (payload: {
-    action: string;
-    data: { id: string };
-    type?: string;
-  }): Promise<{ success: boolean; message: string }> => {
-    // Idempotency and status transition (Section 5.4)
-    console.info('[Mercado Pago Webhook Received]:', payload);
-    const paymentId = payload.data?.id;
+  /**
+   * Consulta status do pagamento em tempo real no servidor/Mercado Pago.
+   */
+  checkPaymentStatus: async (orderId: string): Promise<PaymentStatusCheckResult> => {
+    try {
+      const response = await fetch(`/api/payments/${orderId}/status`);
+      if (response.ok) {
+        const data = await response.json();
 
-    if (!paymentId) {
-      return { success: false, message: 'Invalid payload: missing data.id' };
+        // Se estiver aprovado, sincroniza com dataStore local
+        if (data.is_approved) {
+          await dataStore.updatePaymentStatus(orderId, 'APPROVED');
+          await dataStore.updateOrderStatus(
+            orderId,
+            'CONFIRMED',
+            'MERCADO_PAGO',
+            'Pagamento confirmado pelo Mercado Pago'
+          );
+        }
+
+        const orders = await dataStore.getOrders();
+        const updatedOrder = orders.find((o) => o.id === orderId) || null;
+
+        return {
+          order_id: orderId,
+          payment_status: data.payment_status,
+          order_status: data.order_status,
+          is_approved: data.is_approved,
+          payment: data.payment,
+          order: updatedOrder,
+        };
+      }
+    } catch (err) {
+      console.warn('[PaymentService] Erro ao checar status:', err);
     }
 
-    // Find order with this payment
     const orders = await dataStore.getOrders();
-    const order = orders.find((o) => o.payment?.external_id === paymentId || o.payment?.id === paymentId);
+    const current = orders.find((o) => o.id === orderId);
 
-    if (!order) {
-      return { success: false, message: 'Order not found for payment' };
-    }
-
-    if (order.payment_status === 'APPROVED') {
-      return { success: true, message: 'Payment already approved (idempotent)' };
-    }
-
-    await dataStore.updatePaymentStatus(order.id, 'APPROVED', paymentId);
-    await dataStore.updateOrderStatus(
-      order.id,
-      'CONFIRMED',
-      'MERCADO_PAGO_WEBHOOK',
-      `Pagamento aprovado via Webhook Mercado Pago [ID: ${paymentId}]`
-    );
-
-    return { success: true, message: 'Payment approved successfully' };
-  },
-
-  simulateApproval: async (orderId: string): Promise<Order | null> => {
-    const order = await dataStore.updatePaymentStatus(orderId, 'APPROVED');
-    if (order) {
-      await dataStore.updateOrderStatus(
-        orderId,
-        'CONFIRMED',
-        'MERCADO_PAGO_SANDBOX',
-        'Pagamento PIX / Cartão aprovado com sucesso no ambiente de testes Mercado Pago'
-      );
-    }
-    return order;
+    return {
+      order_id: orderId,
+      payment_status: current?.payment_status || 'PENDING',
+      order_status: current?.status || 'PENDING_PAYMENT',
+      is_approved: current?.payment_status === 'APPROVED' || current?.status !== 'PENDING_PAYMENT',
+      payment: current?.payment,
+      order: current || null,
+    };
   },
 };

@@ -380,7 +380,7 @@ export const SystemAnalysisModal: React.FC<SystemAnalysisModalProps> = ({
                   </div>
                   <div className="bg-[#FAF7F0] p-2.5 rounded-lg text-xs space-y-1 border border-black/5">
                     <p className="text-[#7E6C58]">
-                      <strong>Onde obter:</strong> Acesse o portal Mercado Pago Developers (<a href="https://www.mercadopago.com.br/developers" target="_blank" rel="noreferrer" className="text-[#B8623F] underline">mercadopago.com.br/developers</a>) &gt; <em>Suas Aplicações</em> &gt; Crie ou selecione uma aplicação &gt; <em>Credenciais de teste</em> (Sandbox: <code>TEST-...</code>) ou <em>Credenciais de produção</em> (<code>APP_USR-...</code>).
+                      <strong>Onde obter:</strong> Acesse o portal Mercado Pago Developers (<a href="https://www.mercadopago.com.br/developers" target="_blank" rel="noreferrer" className="text-[#B8623F] underline">mercadopago.com.br/developers</a>) &gt; <em>Suas Aplicações</em> &gt; Crie ou selecione sua aplicação &gt; <em>Credenciais de produção</em> (<code>APP_USR-...</code>).
                     </p>
                   </div>
                 </div>

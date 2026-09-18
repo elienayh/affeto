@@ -1,6 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { api } from './api';
-import { INITIAL_CATEGORIES, INITIAL_PRODUCTS } from '../data/mockData';
+import { INITIAL_CATEGORIES, INITIAL_PRODUCTS, INITIAL_DELIVERY_CEPS } from '../data/mockData';
 import {
   Category,
   Coupon,
@@ -20,24 +20,25 @@ import {
 } from '../types';
 
 export const DEFAULT_STORE_SETTINGS: StoreSettings = {
-  id: 'store-affeto-main',
+  id: 'a2e33509-1264-431a-a2e3-00003509831a',
   name: 'Affeto Pães Artesanais',
   slug: 'affeto-paes-artesanais',
   description: 'Padaria artesanal de fermentação lenta com levain de 36 horas, ingredientes nobres e respeito ao tempo do trigo.',
-  address: 'Rua das Flores, 120 - Centro',
+  address: 'Rua Capitão José Carlos - 133',
   city: 'Espera Feliz',
   state: 'MG',
-  pickup_address: 'Rua das Flores, 120 - Centro, Espera Feliz - MG',
-  logo_url: '',
+  pickup_address: 'Rua Capitão José Carlos - 133, Centro, Espera Feliz - MG',
+  logo_url: 'https://ropgdbgkjghwdxdglchz.supabase.co/storage/v1/object/public/affeto-assets/logos/affeto_logo_1789761313562.jpg',
   phone: '(32) 98468-0513',
   whatsapp: '5532984680513',
-  pix_key: '32984680513',
+  pix_key: 'contato@affetopaes.com.br',
   instagram: '@affetopaes',
   is_open: true,
   min_order_value: 20.0,
   free_shipping_threshold: 120.0,
   lead_time_minutes: 45,
   fresh_batch_hours: 'Fornadas frescas diárias saindo às 08h00 e às 15h00.',
+  delivery_schedule_text: 'Entregas nas terças e sextas',
   opening_hours: [
     { day: 'Segunda-feira', open: '07:30', close: '19:30', is_closed: false },
     { day: 'Terça-feira', open: '07:30', close: '19:30', is_closed: false },
@@ -225,6 +226,89 @@ export function getSupabaseClient(): SupabaseClient | null {
   }
 
   return clientInstance;
+}
+
+export const ASSETS_BUCKET = 'affeto-assets';
+
+/**
+ * Upload an image (base64 data URL or File/Blob) to Supabase Storage bucket 'affeto-assets'
+ * to produce a permanent, CDN-backed public URL that works on all devices worldwide.
+ */
+export async function uploadAssetToSupabase(
+  dataUrlOrFile: string | File | Blob,
+  folder: string = 'general',
+  filePrefix: string = 'asset'
+): Promise<string | null> {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      let bufferOrBlob: any;
+      let contentType = 'image/jpeg';
+      let ext = 'jpg';
+
+      if (typeof dataUrlOrFile === 'string') {
+        if (!dataUrlOrFile.startsWith('data:image/')) {
+          if (dataUrlOrFile.startsWith('http://') || dataUrlOrFile.startsWith('https://')) {
+            return dataUrlOrFile;
+          }
+          return null;
+        }
+        const match = dataUrlOrFile.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+        if (!match) return null;
+        ext = match[1].toLowerCase();
+        if (ext === 'jpeg') ext = 'jpg';
+        if (ext === 'svg+xml') ext = 'svg';
+        contentType = `image/${match[1]}`;
+        const byteCharacters = atob(match[2]);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        bufferOrBlob = new Blob([byteArray], { type: contentType });
+      } else {
+        bufferOrBlob = dataUrlOrFile;
+        contentType = (dataUrlOrFile as any).type || 'image/jpeg';
+        if (contentType.includes('png')) ext = 'png';
+        else if (contentType.includes('webp')) ext = 'webp';
+      }
+
+      const filename = `${folder}/${filePrefix}_${Date.now()}.${ext}`;
+      const { error } = await supabase.storage
+        .from(ASSETS_BUCKET)
+        .upload(filename, bufferOrBlob, {
+          contentType,
+          upsert: true,
+        });
+
+      if (!error) {
+        const { data: pubData } = supabase.storage.from(ASSETS_BUCKET).getPublicUrl(filename);
+        if (pubData?.publicUrl) {
+          return pubData.publicUrl;
+        }
+      } else {
+        console.warn('[Supabase Storage Upload Error]:', error.message);
+      }
+    } catch (err) {
+      console.warn('[Supabase Storage Upload Exception]:', err);
+    }
+  }
+
+  // Fallback to server /api/upload
+  if (typeof dataUrlOrFile === 'string' && dataUrlOrFile.startsWith('data:image/')) {
+    try {
+      const resp = await api.post<{ url: string }>('/api/upload', {
+        image: dataUrlOrFile,
+        folder,
+        prefix: filePrefix,
+      });
+      if (resp?.url) return resp.url;
+    } catch (err) {
+      console.warn('[Server API Upload Fallback Error]:', err);
+    }
+  }
+
+  return null;
 }
 
 // Helper for local storage
@@ -469,18 +553,27 @@ export const dataStore = {
   },
 
   saveProduct: async (product: Product): Promise<Product> => {
+    let finalImage = product.image_url;
+    if (finalImage && finalImage.startsWith('data:image/')) {
+      const cdnUrl = await uploadAssetToSupabase(finalImage, 'products', `prod_${product.slug || 'item'}`);
+      if (cdnUrl) {
+        finalImage = cdnUrl;
+      }
+    }
+    const productWithImage: Product = { ...product, image_url: finalImage };
+
     const current = getStored<Product[]>(STORAGE_KEYS.PRODUCTS, []);
     const idx = current.findIndex((p) => p.id === product.id || p.slug === product.slug);
     let updated: Product[];
     if (idx >= 0) {
-      updated = current.map((p) => (p.id === product.id || p.slug === product.slug ? product : p));
+      updated = current.map((p) => (p.id === product.id || p.slug === product.slug ? productWithImage : p));
     } else {
-      updated = [product, ...current];
+      updated = [productWithImage, ...current];
     }
     setStored(STORAGE_KEYS.PRODUCTS, updated);
 
     // Save to server API for permanent cross-browser storage
-    const serverSaved = await api.post<Product>('/api/products', product);
+    const serverSaved = await api.post<Product>('/api/products', productWithImage);
     if (serverSaved) {
       const refreshed = updated.map((p) => (p.id === product.id ? serverSaved : p));
       setStored(STORAGE_KEYS.PRODUCTS, refreshed);
@@ -489,7 +582,7 @@ export const dataStore = {
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        const effectiveImg = serverSaved?.image_url || product.image_url || null;
+        const effectiveImg = serverSaved?.image_url || productWithImage.image_url || null;
         await supabase.from('products').upsert(
           {
             id: toUuid(product.id),
@@ -519,7 +612,7 @@ export const dataStore = {
         console.warn('[Supabase Product Save] error:', err);
       }
     }
-    return serverSaved || product;
+    return serverSaved || productWithImage;
   },
 
   saveProducts: async (products: Product[]): Promise<void> => {
@@ -732,17 +825,14 @@ export const dataStore = {
   },
 
   getDeliveryCeps: async (): Promise<DeliveryCepRule[]> => {
-    // 1. Try server API first
-    const serverCeps = await api.get<DeliveryCepRule[]>('/api/delivery-ceps');
-    if (serverCeps && Array.isArray(serverCeps)) {
-      setStored(STORAGE_KEYS.DELIVERY_CEPS, serverCeps);
-      return serverCeps;
-    }
-
+    // 1. Prioritize live Supabase database
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        const { data, error } = await supabase.from('delivery_ceps').select('*');
+        const { data, error } = await supabase
+          .from('delivery_ceps')
+          .select('*')
+          .order('fee', { ascending: true });
         if (!error && data && data.length > 0) {
           const mapped: DeliveryCepRule[] = data.map((r: any) => ({
             id: r.id,
@@ -750,16 +840,24 @@ export const dataStore = {
             label: r.label,
             fee: Number(r.fee),
             estimated_minutes: Number(r.estimated_minutes || 30),
-            active: r.active ?? true,
+            active: r.active ?? r.is_active ?? true,
           }));
           setStored(STORAGE_KEYS.DELIVERY_CEPS, mapped);
           return mapped;
         }
-      } catch {
-        // Fallback to local
+      } catch (err) {
+        console.warn('[Supabase delivery_ceps read warning]:', err);
       }
     }
-    return getStored<DeliveryCepRule[]>(STORAGE_KEYS.DELIVERY_CEPS, []);
+
+    // 2. Try server API
+    const serverCeps = await api.get<DeliveryCepRule[]>('/api/delivery-ceps');
+    if (serverCeps && Array.isArray(serverCeps) && serverCeps.length > 0) {
+      setStored(STORAGE_KEYS.DELIVERY_CEPS, serverCeps);
+      return serverCeps;
+    }
+
+    return getStored<DeliveryCepRule[]>(STORAGE_KEYS.DELIVERY_CEPS, INITIAL_DELIVERY_CEPS);
   },
 
   saveDeliveryCeps: async (ceps: DeliveryCepRule[]): Promise<void> => {
@@ -770,19 +868,19 @@ export const dataStore = {
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        // Try delivery_ceps table
-        await supabase.from('delivery_ceps').upsert(ceps);
-      } catch {
-        // Also sync to delivery_zones
-        try {
-          for (const c of ceps) {
-            await supabase.from('delivery_zones').upsert({
-              id: toUuid(c.id),
-              name: `CEP: ${c.cep} - ${c.label}`,
-              is_active: c.active,
-            });
-          }
-        } catch {}
+        const payload = ceps.map((c) => ({
+          id: toUuid(c.id),
+          label: c.label,
+          cep: c.cep || '36830-000',
+          fee: Number(c.fee) || 0,
+          estimated_minutes: Number(c.estimated_minutes) || 30,
+          active: Boolean(c.active ?? true),
+          is_active: Boolean(c.active ?? true),
+          updated_at: new Date().toISOString(),
+        }));
+        await supabase.from('delivery_ceps').upsert(payload, { onConflict: 'id' });
+      } catch (err) {
+        console.warn('[Supabase delivery_ceps save warning]:', err);
       }
     }
   },
@@ -1289,6 +1387,7 @@ export const dataStore = {
         const { data, error } = await supabase
           .from('stores')
           .select('*')
+          .order('updated_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
@@ -1303,7 +1402,7 @@ export const dataStore = {
             city: data.city || DEFAULT_STORE_SETTINGS.city,
             state: data.state || DEFAULT_STORE_SETTINGS.state,
             pickup_address: data.pickup_address || data.address || DEFAULT_STORE_SETTINGS.pickup_address,
-            logo_url: data.logo_url || '',
+            logo_url: data.logo_url || DEFAULT_STORE_SETTINGS.logo_url,
             phone: data.phone || DEFAULT_STORE_SETTINGS.phone,
             whatsapp: data.whatsapp || DEFAULT_STORE_SETTINGS.whatsapp,
             pix_key: data.pix_key || DEFAULT_STORE_SETTINGS.pix_key,
@@ -1311,6 +1410,8 @@ export const dataStore = {
             is_open: data.is_open ?? true,
             min_order_value: Number(data.min_order_value || DEFAULT_STORE_SETTINGS.min_order_value),
             lead_time_minutes: Number(data.lead_time_minutes || DEFAULT_STORE_SETTINGS.lead_time_minutes),
+            fresh_batch_hours: data.fresh_batch_hours || DEFAULT_STORE_SETTINGS.fresh_batch_hours,
+            delivery_schedule_text: data.delivery_schedule_text || DEFAULT_STORE_SETTINGS.delivery_schedule_text,
             opening_hours: Array.isArray(data.opening_hours) && data.opening_hours.length > 0 ? data.opening_hours : DEFAULT_STORE_SETTINGS.opening_hours,
           };
           setStored(STORAGE_KEYS.STORE_SETTINGS, merged);
@@ -1333,27 +1434,43 @@ export const dataStore = {
   },
 
   saveStoreSettings: async (settings: StoreSettings): Promise<StoreSettings> => {
-    // 1. Save optimistically locally
-    setStored(STORAGE_KEYS.STORE_SETTINGS, settings);
+    // 1. If logo is base64, upload to Supabase Storage immediately
+    let finalLogo = settings.logo_url;
+    if (finalLogo && finalLogo.startsWith('data:image/')) {
+      const cdnUrl = await uploadAssetToSupabase(finalLogo, 'logos', 'affeto_logo');
+      if (cdnUrl) {
+        finalLogo = cdnUrl;
+      }
+    }
 
-    // 2. Persist to server API permanently so changes (Logo, Address, Name) exist across all browsers and devices
-    let finalSettings: StoreSettings = settings;
-    const serverSaved = await api.put<StoreSettings>('/api/store-settings', settings);
+    const settingsWithLogo: StoreSettings = {
+      ...settings,
+      logo_url: finalLogo || DEFAULT_STORE_SETTINGS.logo_url,
+      delivery_schedule_text: settings.delivery_schedule_text !== undefined ? settings.delivery_schedule_text : DEFAULT_STORE_SETTINGS.delivery_schedule_text,
+    };
+
+    // 2. Save locally
+    setStored(STORAGE_KEYS.STORE_SETTINGS, settingsWithLogo);
+
+    // 3. Persist to server API permanently so changes (Logo, Address, Name) exist across all browsers and devices
+    let finalSettings: StoreSettings = settingsWithLogo;
+    const serverSaved = await api.put<StoreSettings>('/api/store-settings', settingsWithLogo);
     if (serverSaved && serverSaved.name) {
       finalSettings = serverSaved;
       setStored(STORAGE_KEYS.STORE_SETTINGS, serverSaved);
     }
 
-    // 3. Sync to Supabase if configured (persists logo_url, address, pix, phone across all instances)
+    // 4. Sync to Supabase directly
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        const effectiveLogo = finalSettings.logo_url || settings.logo_url || null;
+        const effectiveLogo = finalSettings.logo_url || finalLogo || null;
+        const storeId = toUuid(settings.id || 'a2e33509-1264-431a-a2e3-00003509831a');
         await supabase.from('stores').upsert(
           {
-            id: toUuid(settings.id || 'store-affeto-matriz'),
+            id: storeId,
             name: settings.name,
-            slug: settings.slug || 'affeto-paes',
+            slug: settings.slug || 'affeto-paes-artesanais',
             address: settings.address,
             phone: settings.phone,
             whatsapp: settings.whatsapp,
@@ -1365,27 +1482,10 @@ export const dataStore = {
             opening_hours: settings.opening_hours || [],
             updated_at: new Date().toISOString(),
           },
-          { onConflict: 'slug' }
+          { onConflict: 'id' }
         );
       } catch (err) {
         console.warn('[Supabase Store Save Warning]:', err);
-        // Fallback to store_settings table if needed
-        try {
-          await supabase.from('store_settings').upsert({
-            id: toUuid(settings.id || 'store-affeto-matriz'),
-            name: settings.name,
-            slug: settings.slug,
-            description: settings.description,
-            address: settings.address,
-            phone: settings.phone,
-            whatsapp: settings.whatsapp,
-            pix_key: settings.pix_key,
-            logo_url: finalSettings.logo_url || settings.logo_url || null,
-            min_order_value: settings.min_order_value,
-            free_shipping_threshold: settings.free_shipping_threshold,
-            lead_time_minutes: settings.lead_time_minutes,
-          });
-        } catch {}
       }
     }
 

@@ -17,6 +17,7 @@ import {
   Wheat,
   ShieldCheck,
   Lock,
+  Truck,
 } from 'lucide-react';
 import { catalogService } from './services/catalogService';
 import { orderService } from './services/orderService';
@@ -319,8 +320,7 @@ export default function App() {
     });
 
     showToast(`"${product.name}" adicionado à sua cesta!`);
-    // Abre o carrinho automaticamente para que o cliente veja o item
-    setIsCartOpen(true);
+    // Não abre a cesta automaticamente, permitindo que o cliente continue escolhendo mais produtos livremente.
   };
 
   const handleQuickAdd = (product: Product) => {
@@ -672,6 +672,7 @@ export default function App() {
                       src={storeSettings.logo_url}
                       alt={storeSettings.name}
                       className="w-full h-full rounded-lg object-cover"
+                      referrerPolicy="no-referrer"
                     />
                   </div>
                 ) : (
@@ -694,35 +695,15 @@ export default function App() {
               </p>
             </div>
 
-            {/* Column 2: Hours & Schedule */}
+            {/* Column 2: Delivery Schedule */}
             <div className="space-y-2 text-xs">
               <h4 className="font-serif font-bold text-sm text-[#EADBBA]">
-                Horários da Fornada
+                Programação de Entregas
               </h4>
-              {storeSettings.opening_hours && storeSettings.opening_hours.length > 0 ? (
-                <div className="space-y-1.5 text-[#A99885]">
-                  {storeSettings.opening_hours.map((oh, idx) => (
-                    <p key={idx} className="flex items-center justify-between text-[11px]">
-                      <span className="text-white/80">{oh.day}:</span>
-                      <span className={oh.is_closed ? 'text-rose-400 font-medium' : 'text-[#FAF7F0] font-medium'}>
-                        {oh.is_closed ? 'Fechado' : `${oh.open} às ${oh.close}`}
-                      </span>
-                    </p>
-                  ))}
-                </div>
-              ) : (
-                <>
-                  <p className="text-[#A99885]">
-                    <strong className="text-white">Segunda a Sábado:</strong> 07h30 às 19h30
-                  </p>
-                  <p className="text-[#A99885]">
-                    <strong className="text-white">Domingos e Feriados:</strong> 08h00 às 14h00
-                  </p>
-                </>
-              )}
-              <p className="text-[#B7A05E] pt-2 font-medium text-[11px]">
-                {storeSettings.fresh_batch_hours || 'Fornada fresca saindo às 08h00 e às 15h00.'}
-              </p>
+              <div className="flex items-center gap-2 text-sm font-medium text-[#FAF7F0] bg-white/5 py-2.5 px-3 rounded-xl border border-white/10">
+                <Truck className="w-4 h-4 text-[#B8623F] shrink-0" />
+                <span>{storeSettings.delivery_schedule_text || 'Entregas nas terças e sextas'}</span>
+              </div>
             </div>
 
             {/* Column 3: Location & Contact */}
@@ -817,15 +798,17 @@ export default function App() {
       {/* MODALS & OVERLAYS */}
 
       {/* 1. Product Customization & Details Modal */}
-      <ProductModal
-        product={selectedProduct}
-        orders={allOrders}
-        productionBatches={productionBatches}
-        onClose={() => setSelectedProduct(null)}
-        isFavorite={selectedProduct ? favoriteIds.includes(selectedProduct.id) : false}
-        onToggleFavorite={handleToggleFavorite}
-        onAddToCart={handleAddToCart}
-      />
+      {selectedProduct && (
+        <ProductModal
+          product={selectedProduct}
+          orders={allOrders}
+          productionBatches={productionBatches}
+          onClose={() => setSelectedProduct(null)}
+          isFavorite={selectedProduct ? favoriteIds.includes(selectedProduct.id) : false}
+          onToggleFavorite={handleToggleFavorite}
+          onAddToCart={handleAddToCart}
+        />
+      )}
 
       {/* 2. Cart Drawer */}
       <CartDrawer
@@ -870,11 +853,13 @@ export default function App() {
       />
 
       {/* 4. Live Order Tracking Modal */}
-      <OrderTrackingModal
-        order={trackingOrder}
-        onClose={() => setTrackingOrder(null)}
-        storePhone={storeSettings.whatsapp}
-      />
+      {trackingOrder && (
+        <OrderTrackingModal
+          order={trackingOrder}
+          onClose={() => setTrackingOrder(null)}
+          storePhone={storeSettings.whatsapp}
+        />
+      )}
 
       {/* 5. Order Lookup Modal */}
       <OrderLookupModal
