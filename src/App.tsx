@@ -775,22 +775,24 @@ export default function App() {
             </div>
           </div>
 
-          <div className="mt-10 pt-6 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between text-xs text-[#7E6C58]">
-            <p>© {new Date().getFullYear()} {storeSettings.name}. Feito com afeto e farinha pura.</p>
-            
-            <div className="flex items-center gap-4 mt-3 sm:mt-0">
-              <span className="text-[11px] text-[#554432] hidden sm:inline">Affeto Delivery & Balcão</span>
-              {/* Botão no rodapé para o Painel do Gestor com autenticação */}
+          <div className="mt-10 pt-6 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#7E6C58]">
+            {/* Botão no rodapé para o Painel do Gestor posicionado à esquerda */}
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
               <button
                 id="btn-footer-painel-gestor"
                 onClick={handleOpenAdminPanel}
-                className="text-[#A99885] hover:text-[#EADBBA] transition-colors flex items-center gap-1.5 cursor-pointer py-1 px-2.5 rounded-lg hover:bg-white/5 border border-white/5 hover:border-white/10"
+                className="text-[#A99885] hover:text-[#EADBBA] transition-colors flex items-center gap-1.5 cursor-pointer py-1.5 px-3 rounded-lg hover:bg-white/5 border border-white/10 hover:border-white/20"
                 title="Acesso Restrito da Gerência"
               >
                 <Lock className="w-3.5 h-3.5 text-[#B8623F]" />
                 <span className="font-medium text-[#C4B7A6] hover:text-white">Painel do Gestor</span>
               </button>
+              <span className="text-[11px] text-[#554432] hidden sm:inline">Affeto Delivery & Balcão</span>
             </div>
+
+            <p className="w-full sm:w-auto text-center sm:text-right">
+              © {new Date().getFullYear()} {storeSettings.name}. Feito com afeto e farinha pura.
+            </p>
           </div>
         </div>
       </footer>
