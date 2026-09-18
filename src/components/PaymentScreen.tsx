@@ -41,8 +41,7 @@ export const PaymentScreen: React.FC<PaymentScreenProps> = ({
   const [isLoadingPayment, setIsLoadingPayment] = useState(!order.payment);
   const [checkFeedback, setCheckFeedback] = useState<string | null>(null);
 
-  const isApproved =
-    currentOrder.payment_status === 'APPROVED' || currentOrder.status !== 'PENDING_PAYMENT';
+  const isApproved = currentOrder.payment_status === 'APPROVED';
 
   // Inicializa o registro de cobrança real no Mercado Pago
   useEffect(() => {

@@ -150,7 +150,7 @@ export const paymentService = {
       order_id: orderId,
       payment_status: current?.payment_status || 'PENDING',
       order_status: current?.status || 'PENDING_PAYMENT',
-      is_approved: current?.payment_status === 'APPROVED' || current?.status !== 'PENDING_PAYMENT',
+      is_approved: current?.payment_status === 'APPROVED',
       payment: current?.payment,
       order: current || null,
     };

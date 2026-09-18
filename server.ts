@@ -20,8 +20,6 @@ import {
   isMercadoPagoConfigured,
 } from './src/server/mercadopago';
 
-const currentDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
-
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -35,12 +33,12 @@ async function startServer() {
   app.use('/uploads', express.static(uploadsPath));
 
   // 1. Health check
-  app.get('/api/health', (req, res) => {
+  app.get('/api/health', (_req, res) => {
     const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ropgdbgkjghwdxdglchz.supabase.co';
     const hasAnonKey = Boolean(process.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
     const hasServiceRoleKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-    res.json({
+    return res.json({
       status: 'ok',
       app: 'Affeto Pães',
       supabase_target: supabaseUrl,
@@ -53,8 +51,8 @@ async function startServer() {
 
   // Client configuration: guarantees every browser (Chrome, Safari, mobile, incognito)
   // automatically connects to the same Supabase database without manual setup!
-  app.get('/api/config', (req, res) => {
-    res.json({
+  app.get('/api/config', (_req, res) => {
+    return res.json({
       supabaseUrl: process.env.VITE_SUPABASE_URL || 'https://ropgdbgkjghwdxdglchz.supabase.co',
       supabaseAnonKey: process.env.VITE_SUPABASE_ANON_KEY || '',
       bakeryWhatsapp: process.env.VITE_BAKERY_WHATSAPP_NUMBER || '5532984680513',
@@ -64,27 +62,26 @@ async function startServer() {
   // -----------------------------------------------------------------
   // STORE SETTINGS & LOGO / ADDRESS PERSISTENCE
   // -----------------------------------------------------------------
-  const handleGetSettings = async (req: express.Request, res: express.Response) => {
+  const handleGetSettings = async (_req: express.Request, res: express.Response) => {
     try {
-      // 1. Fetch live from Supabase stores table for instantaneous cross-device consistency
+      // 1. Busca no Supabase para sincronização em tempo real entre dispositivos
       const supabaseSettings = await getStoreSettingsFromSupabase();
       if (supabaseSettings) {
         serverStorage.updateSettings(supabaseSettings);
-        res.json(supabaseSettings);
-        return;
+        return res.json(supabaseSettings);
       }
       const settings = serverStorage.getSettings();
-      res.json(settings);
+      return res.json(settings);
     } catch (err: any) {
       console.error('[API Settings Get Error]:', err);
-      res.json(serverStorage.getSettings());
+      return res.json(serverStorage.getSettings());
     }
   };
 
   const handleUpdateSettings = async (req: express.Request, res: express.Response) => {
     try {
-      let payload = { ...req.body };
-      // If logo is base64, upload permanently to Supabase Storage
+      const payload = { ...req.body };
+      // Se a imagem for base64, realiza upload permanente para o Supabase Storage
       if (payload.logo_url && payload.logo_url.startsWith('data:image/')) {
         const permanentCdnUrl = await uploadAssetToSupabaseStorage(payload.logo_url, 'logos', 'affeto_logo');
         if (permanentCdnUrl) {
@@ -92,14 +89,18 @@ async function startServer() {
         }
       }
 
+      // 1. Atualiza configurações locais
       const updated = serverStorage.updateSettings(payload);
-      // Dual persistence: sync immediately to Supabase database so all devices and instances see it!
+
+      // 2. Sincroniza imediatamente com o banco de dados Supabase
       const synced = await syncStoreSettingsToSupabase(updated);
-      console.info('[API Settings Updated]: Logo and settings saved in server and Supabase. Logo URL:', synced.logo_url);
-      res.json(synced);
+      console.info('[API Settings Updated]: Logo e configurações salvos no servidor e Supabase.');
+
+      // 3. Retorna apenas uma resposta HTTP final
+      return res.json(synced || updated);
     } catch (err: any) {
       console.error('[API Settings Update Error]:', err);
-      res.status(500).json({ error: 'Erro ao salvar configurações no servidor' });
+      return res.status(500).json({ error: 'Erro ao salvar configurações no servidor' });
     }
   };
 
@@ -131,25 +132,24 @@ async function startServer() {
   // -----------------------------------------------------------------
   // PRODUCTS PERSISTENCE
   // -----------------------------------------------------------------
-  app.get('/api/products', (req, res) => {
+  app.get('/api/products', (_req, res) => {
     try {
       const products = serverStorage.getProducts();
-      res.json(products);
+      return res.json(products);
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao carregar produtos' });
+      return res.status(500).json({ error: 'Erro ao carregar produtos' });
     }
   });
 
   app.post('/api/products', async (req, res) => {
     try {
       const saved = serverStorage.saveProduct(req.body);
-      // Dual persistence: sync to Supabase database with image, options and schedule
       syncProductToSupabase(saved).catch((err) => {
         console.warn('[Server] Supabase product sync warning:', err);
       });
-      res.json(saved);
+      return res.json(saved);
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao salvar produto' });
+      return res.status(500).json({ error: 'Erro ao salvar produto' });
     }
   });
 
@@ -159,9 +159,9 @@ async function startServer() {
       syncProductToSupabase(saved).catch((err) => {
         console.warn('[Server] Supabase product sync warning:', err);
       });
-      res.json(saved);
+      return res.json(saved);
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao atualizar produto' });
+      return res.status(500).json({ error: 'Erro ao atualizar produto' });
     }
   });
 
@@ -171,20 +171,20 @@ async function startServer() {
       deleteProductFromSupabase(req.params.id).catch((err) => {
         console.warn('[Server] Supabase product delete warning:', err);
       });
-      res.json({ success });
+      return res.json({ success });
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao excluir produto' });
+      return res.status(500).json({ error: 'Erro ao excluir produto' });
     }
   });
 
   // -----------------------------------------------------------------
   // CATEGORIES PERSISTENCE
   // -----------------------------------------------------------------
-  app.get('/api/categories', (req, res) => {
+  app.get('/api/categories', (_req, res) => {
     try {
-      res.json(serverStorage.getCategories());
+      return res.json(serverStorage.getCategories());
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao carregar categorias' });
+      return res.status(500).json({ error: 'Erro ao carregar categorias' });
     }
   });
 
@@ -194,9 +194,9 @@ async function startServer() {
       syncCategoryToSupabase(saved).catch((err) => {
         console.warn('[Server] Supabase category sync warning:', err);
       });
-      res.json(saved);
+      return res.json(saved);
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao salvar categoria' });
+      return res.status(500).json({ error: 'Erro ao salvar categoria' });
     }
   });
 
@@ -206,70 +206,70 @@ async function startServer() {
       deleteCategoryFromSupabase(req.params.id).catch((err) => {
         console.warn('[Server] Supabase category delete warning:', err);
       });
-      res.json({ success });
+      return res.json({ success });
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao excluir categoria' });
+      return res.status(500).json({ error: 'Erro ao excluir categoria' });
     }
   });
 
   // -----------------------------------------------------------------
   // COUPONS PERSISTENCE
   // -----------------------------------------------------------------
-  app.get('/api/coupons', (req, res) => {
+  app.get('/api/coupons', (_req, res) => {
     try {
-      res.json(serverStorage.getCoupons());
+      return res.json(serverStorage.getCoupons());
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao carregar cupons' });
+      return res.status(500).json({ error: 'Erro ao carregar cupons' });
     }
   });
 
   app.post('/api/coupons', (req, res) => {
     try {
       const saved = serverStorage.saveCoupon(req.body);
-      res.json(saved);
+      return res.json(saved);
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao salvar cupom' });
+      return res.status(500).json({ error: 'Erro ao salvar cupom' });
     }
   });
 
   app.delete('/api/coupons/:id', (req, res) => {
     try {
       const success = serverStorage.deleteCoupon(req.params.id);
-      res.json({ success });
+      return res.json({ success });
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao excluir cupom' });
+      return res.status(500).json({ error: 'Erro ao excluir cupom' });
     }
   });
 
   // -----------------------------------------------------------------
   // DELIVERY ZONES & CEPS PERSISTENCE
   // -----------------------------------------------------------------
-  app.get('/api/delivery-zones', (req, res) => {
+  app.get('/api/delivery-zones', (_req, res) => {
     try {
-      res.json(serverStorage.getDeliveryZones());
+      return res.json(serverStorage.getDeliveryZones());
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao carregar zonas de entrega' });
+      return res.status(500).json({ error: 'Erro ao carregar zonas de entrega' });
     }
   });
 
   app.put('/api/delivery-zones', (req, res) => {
     try {
-      res.json(serverStorage.saveDeliveryZones(req.body));
+      return res.json(serverStorage.saveDeliveryZones(req.body));
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao atualizar zonas de entrega' });
+      return res.status(500).json({ error: 'Erro ao atualizar zonas de entrega' });
     }
   });
 
-  app.get('/api/delivery-ceps', async (req, res) => {
+  app.get('/api/delivery-ceps', async (_req, res) => {
     try {
       const fromSupabase = await getDeliveryCepsFromSupabase();
       if (fromSupabase && fromSupabase.length > 0) {
-        res.json(fromSupabase);
-        return;
+        return res.json(fromSupabase);
       }
-      res.json(serverStorage.getDeliveryCeps());
+      return res.json(serverStorage.getDeliveryCeps());
     } catch (err) {
-      res.json(serverStorage.getDeliveryCeps());
+      console.warn('[Server] Falha ao consultar CEPs do Supabase, usando local:', err);
+      return res.json(serverStorage.getDeliveryCeps());
     }
   });
 
@@ -279,18 +279,18 @@ async function startServer() {
       syncDeliveryCepsToSupabase(serverStorage.getDeliveryCeps()).catch((err) => {
         console.warn('[Server] Supabase delivery ceps sync warning:', err);
       });
-      res.json(saved);
+      return res.json(saved);
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao salvar regra de CEP' });
+      return res.status(500).json({ error: 'Erro ao salvar regra de CEP' });
     }
   });
 
   app.delete('/api/delivery-ceps/:id', (req, res) => {
     try {
       const success = serverStorage.deleteDeliveryCep(req.params.id);
-      res.json({ success });
+      return res.json({ success });
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao excluir regra de CEP' });
+      return res.status(500).json({ error: 'Erro ao excluir regra de CEP' });
     }
   });
 
@@ -314,20 +314,20 @@ async function startServer() {
   // -----------------------------------------------------------------
   // ORDERS PERSISTENCE
   // -----------------------------------------------------------------
-  app.get('/api/orders', (req, res) => {
+  app.get('/api/orders', (_req, res) => {
     try {
-      res.json(serverStorage.getOrders());
+      return res.json(serverStorage.getOrders());
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao carregar pedidos' });
+      return res.status(500).json({ error: 'Erro ao carregar pedidos' });
     }
   });
 
   app.post('/api/orders', (req, res) => {
     try {
       const saved = serverStorage.addOrder(req.body);
-      res.status(201).json(saved);
+      return res.status(201).json(saved);
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao registrar pedido' });
+      return res.status(500).json({ error: 'Erro ao registrar pedido' });
     }
   });
 
@@ -338,9 +338,9 @@ async function startServer() {
       if (!updated) {
         return res.status(404).json({ error: 'Pedido não encontrado' });
       }
-      res.json(updated);
+      return res.json(updated);
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao atualizar status do pedido' });
+      return res.status(500).json({ error: 'Erro ao atualizar status do pedido' });
     }
   });
 
@@ -351,28 +351,28 @@ async function startServer() {
       if (!updated) {
         return res.status(404).json({ error: 'Pedido não encontrado' });
       }
-      res.json(updated);
+      return res.json(updated);
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao atualizar status de pagamento' });
+      return res.status(500).json({ error: 'Erro ao atualizar status de pagamento' });
     }
   });
 
   // -----------------------------------------------------------------
   // PRODUCTION BATCHES PERSISTENCE
   // -----------------------------------------------------------------
-  app.get('/api/production-batches', (req, res) => {
+  app.get('/api/production-batches', (_req, res) => {
     try {
-      res.json(serverStorage.getProductionBatches());
+      return res.json(serverStorage.getProductionBatches());
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao carregar fornadas' });
+      return res.status(500).json({ error: 'Erro ao carregar fornadas' });
     }
   });
 
   app.post('/api/production-batches', (req, res) => {
     try {
-      res.json(serverStorage.updateProductionBatch(req.body));
+      return res.json(serverStorage.updateProductionBatch(req.body));
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao atualizar fornada' });
+      return res.status(500).json({ error: 'Erro ao atualizar fornada' });
     }
   });
 
@@ -380,9 +380,9 @@ async function startServer() {
     try {
       const { product_id, production_date, quantity, default_capacity } = req.body;
       const result = serverStorage.reserveBatchCapacity(product_id, production_date, quantity, default_capacity || 10);
-      res.json(result);
+      return res.json(result);
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao reservar lote da fornada' });
+      return res.status(500).json({ error: 'Erro ao reservar lote da fornada' });
     }
   });
 
@@ -390,13 +390,13 @@ async function startServer() {
     try {
       const { product_id, production_date, quantity } = req.body;
       serverStorage.releaseBatchCapacity(product_id, production_date, quantity);
-      res.json({ success: true });
+      return res.json({ success: true });
     } catch (err) {
-      res.status(500).json({ error: 'Erro ao liberar lote' });
+      return res.status(500).json({ error: 'Erro ao liberar lote' });
     }
   });
 
-  // 2. Server-side Pricing Engine (Single Source of Truth - Section 5.1)
+  // 2. Server-side Pricing Engine (Single Source of Truth)
   app.post('/api/pricing/calculate', (req, res) => {
     try {
       const { items, delivery_type, delivery_zone_id, coupon_code } = req.body;
@@ -422,9 +422,9 @@ async function startServer() {
     }
   });
 
-  // 3. Mercado Pago Real Payment Integration
-  app.get('/api/payments/config', (req, res) => {
-    res.json({
+  // 3. Mercado Pago Payment Integration
+  app.get('/api/payments/config', (_req, res) => {
+    return res.json({
       mercadopago_configured: isMercadoPagoConfigured(),
       environment: 'production',
       supported_methods: ['PIX', 'CREDIT_CARD'],
@@ -479,7 +479,7 @@ async function startServer() {
         return res.status(404).json({ error: 'Pedido não encontrado' });
       }
 
-      let paymentRecord = order.payment;
+      const paymentRecord = order.payment;
 
       // Se o pedido ainda está pendente e possui ID numérico real do Mercado Pago, consulta status na API do Mercado Pago
       if (
@@ -513,7 +513,7 @@ async function startServer() {
         order_id: freshOrder.id,
         payment_status: freshOrder.payment_status,
         order_status: freshOrder.status,
-        is_approved: freshOrder.payment_status === 'APPROVED' || freshOrder.status !== 'PENDING_PAYMENT',
+        is_approved: freshOrder.payment_status === 'APPROVED',
         payment: freshOrder.payment,
       });
     } catch (err: any) {
@@ -577,8 +577,8 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.get('*', (_req, res) => {
+      return res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
@@ -588,3 +588,4 @@ async function startServer() {
 }
 
 startServer();
+
