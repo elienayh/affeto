@@ -1,6 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { api } from './api';
-import { INITIAL_CATEGORIES, INITIAL_PRODUCTS, INITIAL_DELIVERY_CEPS } from '../data/mockData';
 import {
   Category,
   Coupon,

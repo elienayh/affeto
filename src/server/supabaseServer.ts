@@ -403,3 +403,189 @@ export async function getDeliveryCepsFromSupabase(): Promise<DeliveryCepRule[] |
   }
 }
 
+export async function getProductsFromSupabase(): Promise<Product[] | null> {
+  const client = getServerSupabaseClient();
+  if (!client) return null;
+  try {
+    const { data, error } = await client.from('products').select('*').order('name');
+    if (error || !data || data.length === 0) return null;
+    return data.map((row: any) => ({
+      id: row.id,
+      category_id: row.category_id || '',
+      name: row.name,
+      slug: row.slug,
+      description: row.description || '',
+      base_price: Number(row.base_price ?? row.price ?? 0),
+      promotional_price: row.promotional_price ? Number(row.promotional_price) : null,
+      unit: row.unit || 'unidade',
+      image_url: row.image_url || '',
+      is_active: row.is_active ?? row.active ?? true,
+      is_featured: Boolean(row.is_featured ?? false),
+      stock_quantity: Number(row.stock_quantity ?? 15),
+      track_stock: Boolean(row.track_stock ?? true),
+      allergens: Array.isArray(row.allergens) ? row.allergens : [],
+      tags: Array.isArray(row.tags) ? row.tags : [],
+      options: Array.isArray(row.options) ? row.options : [],
+      schedule_config: row.schedule_config || {},
+      created_at: row.created_at || new Date().toISOString(),
+      updated_at: row.updated_at || new Date().toISOString(),
+    }));
+  } catch (err: any) {
+    console.warn('[ServerSupabase] Products fetch error:', err?.message || err);
+    return null;
+  }
+}
+
+export async function getCategoriesFromSupabase(): Promise<Category[] | null> {
+  const client = getServerSupabaseClient();
+  if (!client) return null;
+  try {
+    const { data, error } = await client.from('categories').select('*').order('display_order', { ascending: true });
+    if (error || !data || data.length === 0) return null;
+    return data.map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      description: row.description || '',
+      sort_order: Number(row.display_order ?? row.sort_order ?? 0),
+      active: row.is_active ?? row.active ?? true,
+      image_url: row.image_url || undefined,
+    }));
+  } catch (err: any) {
+    console.warn('[ServerSupabase] Categories fetch error:', err?.message || err);
+    return null;
+  }
+}
+
+export async function getCouponsFromSupabase(): Promise<any[] | null> {
+  const client = getServerSupabaseClient();
+  if (!client) return null;
+  try {
+    const { data, error } = await client.from('coupons').select('*');
+    if (error || !data || data.length === 0) return null;
+    return data.map((row: any) => ({
+      id: row.id,
+      code: row.code,
+      discount_type: row.percent_off ? 'PERCENTAGE' : (row.discount_type || 'FIXED'),
+      discount_value: Number(row.percent_off || row.discount_value || row.amount_off || 0),
+      min_order_value: Number(row.min_order_value || 0),
+      active: row.is_active ?? row.active ?? true,
+      max_uses: row.usage_limit ?? null,
+      usage_count: Number(row.usage_count || 0),
+      valid_from: row.valid_from || new Date(0).toISOString(),
+      valid_until: row.valid_until || new Date(Date.now() + 365 * 86400000).toISOString(),
+    }));
+  } catch (err: any) {
+    console.warn('[ServerSupabase] Coupons fetch error:', err?.message || err);
+    return null;
+  }
+}
+
+export async function getDeliveryZonesFromSupabase(): Promise<any[] | null> {
+  const client = getServerSupabaseClient();
+  if (!client) return null;
+  try {
+    const { data, error } = await client.from('delivery_zones').select('*').order('name');
+    if (error || !data || data.length === 0) return null;
+    return data.map((z: any) => ({
+      id: z.id,
+      name: z.name,
+      neighborhood: z.name || 'Centro',
+      fee: Number(z.fee ?? 0),
+      estimated_minutes: Number(z.estimated_minutes ?? z.min_lead_time_minutes ?? 35),
+      active: z.is_active ?? z.active ?? true,
+    }));
+  } catch (err: any) {
+    console.warn('[ServerSupabase] Delivery zones fetch error:', err?.message || err);
+    return null;
+  }
+}
+
+export async function getOrdersFromSupabase(): Promise<any[] | null> {
+  const client = getServerSupabaseClient();
+  if (!client) return null;
+  try {
+    const { data, error } = await client
+      .from('orders')
+      .select('*, order_items(*), order_status_history(*), addresses(*)')
+      .order('created_at', { ascending: false });
+    if (error || !data || data.length === 0) return null;
+    return data.map((row: any) => ({
+      id: row.id,
+      order_number: row.order_number || String(row.id).substring(0, 8),
+      customer_id: row.customer_id || '',
+      customer_name: row.customer_name || 'Cliente',
+      customer_phone: row.customer_phone || '',
+      status: row.status || 'PENDING',
+      payment_status: row.payment_status || 'PENDING',
+      payment_method: row.payment_method || 'PIX',
+      delivery_type: row.delivery_type || row.fulfillment_type || 'DELIVERY',
+      subtotal: Number(row.subtotal || 0),
+      discount: Number(row.discount || 0),
+      delivery_fee: Number(row.delivery_fee || 0),
+      total: Number(row.total || 0),
+      notes: row.notes || '',
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      items: (row.order_items || []).map((it: any) => ({
+        id: it.id,
+        order_id: row.id,
+        product_id: it.product_id,
+        product_name: it.product_name || 'Item do Pedido',
+        unit_price: Number(it.unit_price || 0),
+        quantity: Number(it.quantity || 1),
+        subtotal: Number(it.unit_price || 0) * Number(it.quantity || 1),
+        notes: it.notes || '',
+      })),
+      address: row.addresses ? {
+        street: row.addresses.street || '',
+        number: row.addresses.number || '',
+        complement: row.addresses.complement || '',
+        neighborhood: row.addresses.neighborhood || '',
+        city: row.addresses.city || 'Espera Feliz',
+        state: row.addresses.state || 'MG',
+        zip_code: row.addresses.zip_code || '',
+      } : (row.address || row.delivery_address || undefined),
+      status_history: (row.order_status_history || []).map((h: any) => ({
+        id: h.id,
+        order_id: row.id,
+        previous_status: null,
+        new_status: h.status,
+        changed_by: h.changed_by || 'SISTEMA',
+        notes: h.notes || '',
+        created_at: h.changed_at || h.created_at,
+      })),
+      pix_qr_code: row.pix_qr_code,
+      pix_copy_paste: row.pix_copy_paste,
+    }));
+  } catch (err: any) {
+    console.warn('[ServerSupabase] Orders fetch error:', err?.message || err);
+    return null;
+  }
+}
+
+export async function getProductionBatchesFromSupabase(): Promise<any[] | null> {
+  const client = getServerSupabaseClient();
+  if (!client) return null;
+  try {
+    const { data, error } = await client
+      .from('production_batches')
+      .select('*')
+      .order('production_date', { ascending: true });
+    if (error || !data) return null;
+    return data.map((b: any) => ({
+      id: b.id,
+      product_id: b.product_id,
+      production_date: b.production_date,
+      capacity: Number(b.capacity ?? 10),
+      reserved_quantity: Number(b.reserved_quantity ?? 0),
+      created_at: b.created_at,
+      updated_at: b.updated_at,
+    }));
+  } catch (err: any) {
+    console.warn('[ServerSupabase] Batches fetch error:', err?.message || err);
+    return null;
+  }
+}
+
+

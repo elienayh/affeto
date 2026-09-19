@@ -33,6 +33,7 @@
     "src/services/**/*",
     "src/server/**/*",
     "server.ts",
+    "api/**/*",
     "vite.config.ts"
   ],
   "exclude": [

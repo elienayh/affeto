@@ -13,6 +13,12 @@ import {
   deleteCategoryFromSupabase,
   syncDeliveryCepsToSupabase,
   getDeliveryCepsFromSupabase,
+  getProductsFromSupabase,
+  getCategoriesFromSupabase,
+  getCouponsFromSupabase,
+  getDeliveryZonesFromSupabase,
+  getOrdersFromSupabase,
+  getProductionBatchesFromSupabase,
 } from './src/server/supabaseServer';
 import {
   createRealMercadoPagoPayment,
@@ -132,10 +138,13 @@ async function startServer() {
   // -----------------------------------------------------------------
   // PRODUCTS PERSISTENCE
   // -----------------------------------------------------------------
-  app.get('/api/products', (_req, res) => {
+  app.get('/api/products', async (_req, res) => {
     try {
-      const products = serverStorage.getProducts();
-      return res.json(products);
+      const fromSupabase = await getProductsFromSupabase();
+      if (fromSupabase && fromSupabase.length > 0) {
+        return res.json(fromSupabase);
+      }
+      return res.json(serverStorage.getProducts());
     } catch (err) {
       return res.status(500).json({ error: 'Erro ao carregar produtos' });
     }
@@ -180,8 +189,12 @@ async function startServer() {
   // -----------------------------------------------------------------
   // CATEGORIES PERSISTENCE
   // -----------------------------------------------------------------
-  app.get('/api/categories', (_req, res) => {
+  app.get('/api/categories', async (_req, res) => {
     try {
+      const fromSupabase = await getCategoriesFromSupabase();
+      if (fromSupabase && fromSupabase.length > 0) {
+        return res.json(fromSupabase);
+      }
       return res.json(serverStorage.getCategories());
     } catch (err) {
       return res.status(500).json({ error: 'Erro ao carregar categorias' });
@@ -215,8 +228,12 @@ async function startServer() {
   // -----------------------------------------------------------------
   // COUPONS PERSISTENCE
   // -----------------------------------------------------------------
-  app.get('/api/coupons', (_req, res) => {
+  app.get('/api/coupons', async (_req, res) => {
     try {
+      const fromSupabase = await getCouponsFromSupabase();
+      if (fromSupabase && fromSupabase.length > 0) {
+        return res.json(fromSupabase);
+      }
       return res.json(serverStorage.getCoupons());
     } catch (err) {
       return res.status(500).json({ error: 'Erro ao carregar cupons' });
@@ -244,8 +261,12 @@ async function startServer() {
   // -----------------------------------------------------------------
   // DELIVERY ZONES & CEPS PERSISTENCE
   // -----------------------------------------------------------------
-  app.get('/api/delivery-zones', (_req, res) => {
+  app.get('/api/delivery-zones', async (_req, res) => {
     try {
+      const fromSupabase = await getDeliveryZonesFromSupabase();
+      if (fromSupabase && fromSupabase.length > 0) {
+        return res.json(fromSupabase);
+      }
       return res.json(serverStorage.getDeliveryZones());
     } catch (err) {
       return res.status(500).json({ error: 'Erro ao carregar zonas de entrega' });
@@ -314,8 +335,12 @@ async function startServer() {
   // -----------------------------------------------------------------
   // ORDERS PERSISTENCE
   // -----------------------------------------------------------------
-  app.get('/api/orders', (_req, res) => {
+  app.get('/api/orders', async (_req, res) => {
     try {
+      const fromSupabase = await getOrdersFromSupabase();
+      if (fromSupabase && fromSupabase.length > 0) {
+        return res.json(fromSupabase);
+      }
       return res.json(serverStorage.getOrders());
     } catch (err) {
       return res.status(500).json({ error: 'Erro ao carregar pedidos' });
@@ -379,8 +404,12 @@ async function startServer() {
   // -----------------------------------------------------------------
   // PRODUCTION BATCHES PERSISTENCE
   // -----------------------------------------------------------------
-  app.get('/api/production-batches', (_req, res) => {
+  app.get('/api/production-batches', async (_req, res) => {
     try {
+      const fromSupabase = await getProductionBatchesFromSupabase();
+      if (fromSupabase && fromSupabase.length > 0) {
+        return res.json(fromSupabase);
+      }
       return res.json(serverStorage.getProductionBatches());
     } catch (err) {
       return res.status(500).json({ error: 'Erro ao carregar fornadas' });
@@ -416,18 +445,28 @@ async function startServer() {
   });
 
   // 2. Server-side Pricing Engine (Single Source of Truth)
-  app.post('/api/pricing/calculate', (req, res) => {
+  app.post('/api/pricing/calculate', async (req, res) => {
     try {
-      const { items, delivery_type, delivery_zone_id, coupon_code } = req.body;
+      const { items, delivery_type, delivery_zone_id, delivery_location_id, zip_code, coupon_code } = req.body;
+
+      const [sbProducts, sbZones, sbCoupons, sbCeps] = await Promise.all([
+        getProductsFromSupabase(),
+        getDeliveryZonesFromSupabase(),
+        getCouponsFromSupabase(),
+        getDeliveryCepsFromSupabase(),
+      ]);
 
       const result = calculateOrderPricing({
         items: items || [],
-        availableProducts: serverStorage.getProducts(),
+        availableProducts: (sbProducts && sbProducts.length > 0) ? sbProducts : serverStorage.getProducts(),
         delivery_type: delivery_type || 'DELIVERY',
         delivery_zone_id,
-        availableZones: serverStorage.getDeliveryZones(),
+        delivery_location_id,
+        availableZones: (sbZones && sbZones.length > 0) ? sbZones : serverStorage.getDeliveryZones(),
+        zip_code,
+        availableCepRules: (sbCeps && sbCeps.length > 0) ? sbCeps : serverStorage.getDeliveryCeps(),
         coupon_code,
-        availableCoupons: serverStorage.getCoupons(),
+        availableCoupons: (sbCoupons && sbCoupons.length > 0) ? sbCoupons : serverStorage.getCoupons(),
       });
 
       if (result.error) {
