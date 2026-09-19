@@ -15,6 +15,15 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// 1.1 Config for runtime Supabase credentials
+app.get('/api/config', (_req, res) => {
+  return res.json({
+    supabaseUrl: process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ropgdbgkjghwdxdglchz.supabase.co',
+    supabaseAnonKey: process.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '',
+    bakeryWhatsapp: process.env.VITE_BAKERY_WHATSAPP_NUMBER || '5532984680513',
+  });
+});
+
 // 2. Server-side Pricing Engine
 app.post('/api/pricing/calculate', (req, res) => {
   try {

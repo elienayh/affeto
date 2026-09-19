@@ -21,34 +21,51 @@ import {
 
 export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   id: 'a2e33509-1264-431a-a2e3-00003509831a',
-  name: 'Affeto Pães Artesanais',
+  name: 'Affeto Pães',
   slug: 'affeto-paes-artesanais',
   description: 'Padaria artesanal de fermentação lenta com levain de 36 horas, ingredientes nobres e respeito ao tempo do trigo.',
   address: 'Rua Capitão José Carlos - 133',
   city: 'Espera Feliz',
   state: 'MG',
-  pickup_address: 'Rua Capitão José Carlos - 133, Centro, Espera Feliz - MG',
+  pickup_address: 'Rua Capitão José Carlos - 133',
   logo_url: 'https://ropgdbgkjghwdxdglchz.supabase.co/storage/v1/object/public/affeto-assets/logos/affeto_logo_1789761313562.jpg',
   phone: '(32) 98468-0513',
   whatsapp: '5532984680513',
-  pix_key: 'contato@affetopaes.com.br',
+  pix_key: 'toledodias87@gmail.com',
   instagram: '@affetopaes',
   is_open: true,
-  min_order_value: 20.0,
+  min_order_value: 15.0,
   free_shipping_threshold: 120.0,
   lead_time_minutes: 45,
   fresh_batch_hours: 'Fornadas frescas diárias saindo às 08h00 e às 15h00.',
   delivery_schedule_text: 'Entregas nas terças e sextas',
   opening_hours: [
-    { day: 'Segunda-feira', open: '07:30', close: '19:30', is_closed: false },
-    { day: 'Terça-feira', open: '07:30', close: '19:30', is_closed: false },
-    { day: 'Quarta-feira', open: '07:30', close: '19:30', is_closed: false },
-    { day: 'Quinta-feira', open: '07:30', close: '19:30', is_closed: false },
-    { day: 'Sexta-feira', open: '07:30', close: '19:30', is_closed: false },
-    { day: 'Sábado', open: '08:00', close: '18:00', is_closed: false },
-    { day: 'Domingo', open: '08:00', close: '13:00', is_closed: false },
+    { day: 'Segunda-feira', open: '07:30', close: '19:30', is_closed: true },
+    { day: 'Terça-feira', open: '12', close: '18', is_closed: false },
+    { day: 'Quarta-feira', open: '07:30', close: '19:30', is_closed: true },
+    { day: 'Quinta-feira', open: '07:30', close: '19:30', is_closed: true },
+    { day: 'Sexta-feira', open: '12', close: '18', is_closed: false },
+    { day: 'Sábado', open: '08:00', close: '18:00', is_closed: true },
+    { day: 'Domingo', open: '08:00', close: '13:00', is_closed: true },
   ],
 };
+
+// Purge legacy store cache from localStorage while preserving user cart & favorites
+if (typeof window !== 'undefined') {
+  try {
+    const legacyKeysToPurge = [
+      'affeto_products_v2',
+      'affeto_categories_v2',
+      'affeto_store_settings_v2',
+      'affeto_delivery_zones_v2',
+      'affeto_coupons_v2',
+      'affeto_delivery_ceps_v2',
+      'affeto_orders_v2',
+      'affeto_production_batches_v2',
+    ];
+    legacyKeysToPurge.forEach((k) => localStorage.removeItem(k));
+  } catch {}
+}
 
 // Provided Supabase project URL
 export const SUPABASE_DEFAULT_URL = 'https://ropgdbgkjghwdxdglchz.supabase.co';
@@ -337,7 +354,7 @@ export const dataStore = {
   // CATEGORIES
   // -------------------------------------------------------------
   getCategories: async (): Promise<Category[]> => {
-    // 1. Prioritize live Supabase database for consistent data across dev and production
+    // 1. Prioritize live Supabase database as the single source of truth
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
@@ -355,7 +372,6 @@ export const dataStore = {
             sort_order: row.display_order ?? row.sort_order ?? 0,
             active: row.is_active ?? row.active ?? true,
           }));
-          setStored(STORAGE_KEYS.CATEGORIES, mapped);
           return mapped;
         }
       } catch (err) {
@@ -363,16 +379,15 @@ export const dataStore = {
       }
     }
 
-    // 2. Try server API as fallback
-    const serverCats = await api.get<Category[]>('/api/categories');
-    if (serverCats && Array.isArray(serverCats) && serverCats.length > 0) {
-      setStored(STORAGE_KEYS.CATEGORIES, serverCats);
-      return serverCats;
-    }
+    // 2. Try server API as live fallback
+    try {
+      const serverCats = await api.get<Category[]>('/api/categories');
+      if (serverCats && Array.isArray(serverCats) && serverCats.length > 0) {
+        return serverCats;
+      }
+    } catch {}
 
-    // 3. Fallback to localStorage or INITIAL_CATEGORIES
-    const local = getStored<Category[]>(STORAGE_KEYS.CATEGORIES, []);
-    return local.length > 0 ? local : INITIAL_CATEGORIES;
+    throw new Error('Não foi possível carregar as categorias da padaria do Supabase.');
   },
 
   saveCategory: async (category: Category): Promise<Category> => {
@@ -461,38 +476,7 @@ export const dataStore = {
   // PRODUCTS
   // -------------------------------------------------------------
   getProducts: async (): Promise<Product[]> => {
-    const localProds = getStored<Product[]>(STORAGE_KEYS.PRODUCTS, []);
-    const localMap = new Map(localProds.map((p) => [p.slug, p]));
-    const initialMap = new Map(INITIAL_PRODUCTS.map((p) => [p.slug, p]));
-
-    const getProductFallback = (row: any): Product | undefined => {
-      if (localMap.has(row.slug)) return localMap.get(row.slug);
-      if (initialMap.has(row.slug)) return initialMap.get(row.slug);
-      const exact = INITIAL_PRODUCTS.find(p => p.slug === row.slug || p.id === row.id);
-      if (exact) return exact;
-
-      const norm = (row.name || '').toLowerCase();
-      const slug = (row.slug || '').toLowerCase();
-
-      if (slug.includes('cenoura') || norm.includes('cenoura')) {
-        return INITIAL_PRODUCTS.find(p => p.slug.includes('cenoura'));
-      }
-      if (slug.includes('croissant') || norm.includes('croissant')) {
-        return INITIAL_PRODUCTS.find(p => p.slug.includes('croissant'));
-      }
-      if (slug.includes('sourdough') || norm.includes('sourdough') || norm.includes('fermentação') || norm.includes('campagne')) {
-        return INITIAL_PRODUCTS.find(p => p.slug.includes('sourdough') || p.slug.includes('campagne'));
-      }
-      if (slug.includes('nutella') || norm.includes('nutella')) {
-        return INITIAL_PRODUCTS.find(p => p.slug.includes('nutella'));
-      }
-      if (slug.includes('cafe') || norm.includes('café') || norm.includes('cafe')) {
-        return INITIAL_PRODUCTS.find(p => p.slug.includes('cafe') || p.slug.includes('cappuccino'));
-      }
-      return INITIAL_PRODUCTS.find(p => norm.includes(p.name.toLowerCase().slice(0, 6)));
-    };
-
-    // 1. Prioritize live Supabase database for consistent data across dev and production
+    // 1. Prioritize live Supabase database as the single source of truth
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
@@ -502,38 +486,34 @@ export const dataStore = {
           .order('name');
 
         if (!error && data && data.length > 0) {
-          const mapped: Product[] = data.map((row: any) => {
-            const fallback = getProductFallback(row);
-            return {
-              id: row.id,
-              category_id: row.category_id || fallback?.category_id || '',
-              name: row.name,
-              slug: row.slug,
-              description: row.description || fallback?.description || '',
-              base_price: Number(row.price ?? row.base_price ?? fallback?.base_price ?? 0),
-              promotional_price: row.promotional_price ? Number(row.promotional_price) : (fallback?.promotional_price ?? null),
-              unit: row.unit || fallback?.unit || 'unidade',
-              is_active: row.is_active ?? row.active ?? true,
-              is_featured: row.is_featured ?? fallback?.is_featured ?? false,
-              stock_quantity: row.stock_quantity ?? fallback?.stock_quantity ?? 15,
-              track_stock: row.track_stock ?? fallback?.track_stock ?? true,
-              image_url: row.image_url || fallback?.image_url || 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=600&auto=format&fit=crop&q=80',
-              allergens: Array.isArray(row.allergens) && row.allergens.length > 0 ? row.allergens : (fallback?.allergens || ['Glúten']),
-              tags: Array.isArray(row.tags) && row.tags.length > 0 ? row.tags : (fallback?.tags || []),
-              options: Array.isArray(row.options) && row.options.length > 0 ? row.options : (fallback?.options || []),
-              schedule_config: row.schedule_config && Object.keys(row.schedule_config).length > 0 ? row.schedule_config : (fallback?.schedule_config || {
-                is_scheduled_only: true,
-                available_days: [2, 4, 6],
-                batch_limit: 15,
-                days_label: 'Terças, Quintas e Sábados',
-                min_lead_days: 1,
-                delivery_window: '14:00 - 18:00',
-              }),
-              created_at: row.created_at || fallback?.created_at || new Date().toISOString(),
-              updated_at: row.updated_at || fallback?.updated_at || new Date().toISOString(),
-            };
-          });
-          setStored(STORAGE_KEYS.PRODUCTS, mapped);
+          const mapped: Product[] = data.map((row: any) => ({
+            id: row.id,
+            category_id: row.category_id || '',
+            name: row.name,
+            slug: row.slug,
+            description: row.description || '',
+            base_price: Number(row.price ?? row.base_price ?? 0),
+            promotional_price: row.promotional_price ? Number(row.promotional_price) : null,
+            unit: row.unit || 'unidade',
+            is_active: row.is_active ?? row.active ?? true,
+            is_featured: row.is_featured ?? false,
+            stock_quantity: row.stock_quantity ?? 15,
+            track_stock: row.track_stock ?? true,
+            image_url: row.image_url || 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=600&auto=format&fit=crop&q=80',
+            allergens: Array.isArray(row.allergens) && row.allergens.length > 0 ? row.allergens : ['Glúten'],
+            tags: Array.isArray(row.tags) ? row.tags : [],
+            options: Array.isArray(row.options) ? row.options : [],
+            schedule_config: row.schedule_config && Object.keys(row.schedule_config).length > 0 ? row.schedule_config : {
+              is_scheduled_only: true,
+              available_days: [2, 5],
+              batch_limit: 15,
+              days_label: 'Terças e Sextas',
+              min_lead_days: 1,
+              delivery_window: '12:00 - 18:00',
+            },
+            created_at: row.created_at || new Date().toISOString(),
+            updated_at: row.updated_at || new Date().toISOString(),
+          }));
           return mapped;
         }
       } catch (err) {
@@ -541,15 +521,15 @@ export const dataStore = {
       }
     }
 
-    // 2. Try server API as fallback
-    const serverProds = await api.get<Product[]>('/api/products');
-    if (serverProds && Array.isArray(serverProds) && serverProds.length > 0) {
-      setStored(STORAGE_KEYS.PRODUCTS, serverProds);
-      return serverProds;
-    }
+    // 2. Try server API as live fallback
+    try {
+      const serverProds = await api.get<Product[]>('/api/products');
+      if (serverProds && Array.isArray(serverProds) && serverProds.length > 0) {
+        return serverProds;
+      }
+    } catch {}
 
-    // 3. Fallback to localStorage or INITIAL_PRODUCTS
-    return localProds.length > 0 ? localProds : INITIAL_PRODUCTS;
+    throw new Error('Não foi possível carregar os produtos da padaria do Supabase.');
   },
 
   saveProduct: async (product: Product): Promise<Product> => {
@@ -675,13 +655,7 @@ export const dataStore = {
   // COUPONS
   // -------------------------------------------------------------
   getCoupons: async (): Promise<Coupon[]> => {
-    // 1. Try server API first
-    const serverCoupons = await api.get<Coupon[]>('/api/coupons');
-    if (serverCoupons && Array.isArray(serverCoupons)) {
-      setStored(STORAGE_KEYS.COUPONS, serverCoupons);
-      return serverCoupons;
-    }
-
+    // 1. Prioritize live Supabase database
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
@@ -699,14 +673,22 @@ export const dataStore = {
             valid_from: row.valid_from,
             valid_until: row.valid_until,
           }));
-          setStored(STORAGE_KEYS.COUPONS, mapped);
           return mapped;
         }
       } catch (err) {
         console.warn('[Supabase Coupons] Read error:', err);
       }
     }
-    return getStored<Coupon[]>(STORAGE_KEYS.COUPONS, []);
+
+    // 2. Try server API
+    try {
+      const serverCoupons = await api.get<Coupon[]>('/api/coupons');
+      if (serverCoupons && Array.isArray(serverCoupons) && serverCoupons.length > 0) {
+        return serverCoupons;
+      }
+    } catch {}
+
+    return [];
   },
 
   saveCoupon: async (coupon: Coupon): Promise<Coupon> => {
@@ -790,13 +772,7 @@ export const dataStore = {
   // DELIVERY ZONES & CEPS
   // -------------------------------------------------------------
   getDeliveryZones: async (): Promise<DeliveryZone[]> => {
-    // 1. Try server API first
-    const serverZones = await api.get<DeliveryZone[]>('/api/delivery-zones');
-    if (serverZones && Array.isArray(serverZones)) {
-      setStored(STORAGE_KEYS.DELIVERY_ZONES, serverZones);
-      return serverZones;
-    }
-
+    // 1. Prioritize live Supabase database
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
@@ -806,17 +782,26 @@ export const dataStore = {
             id: z.id,
             name: z.name,
             neighborhood: z.name || 'Centro',
-            fee: 10,
-            estimated_minutes: 35,
+            fee: Number(z.fee ?? 10),
+            estimated_minutes: Number(z.estimated_minutes ?? 35),
             active: z.is_active ?? true,
           }));
           return mapped;
         }
-      } catch {
-        // Fallback to local
+      } catch (err) {
+        console.warn('[Supabase delivery_zones read error]:', err);
       }
     }
-    return getStored<DeliveryZone[]>(STORAGE_KEYS.DELIVERY_ZONES, []);
+
+    // 2. Try server API
+    try {
+      const serverZones = await api.get<DeliveryZone[]>('/api/delivery-zones');
+      if (serverZones && Array.isArray(serverZones) && serverZones.length > 0) {
+        return serverZones;
+      }
+    } catch {}
+
+    return [];
   },
 
   saveDeliveryZones: async (zones: DeliveryZone[]) => {
@@ -842,7 +827,6 @@ export const dataStore = {
             estimated_minutes: Number(r.estimated_minutes || 30),
             active: r.active ?? r.is_active ?? true,
           }));
-          setStored(STORAGE_KEYS.DELIVERY_CEPS, mapped);
           return mapped;
         }
       } catch (err) {
@@ -851,13 +835,14 @@ export const dataStore = {
     }
 
     // 2. Try server API
-    const serverCeps = await api.get<DeliveryCepRule[]>('/api/delivery-ceps');
-    if (serverCeps && Array.isArray(serverCeps) && serverCeps.length > 0) {
-      setStored(STORAGE_KEYS.DELIVERY_CEPS, serverCeps);
-      return serverCeps;
-    }
+    try {
+      const serverCeps = await api.get<DeliveryCepRule[]>('/api/delivery-ceps');
+      if (serverCeps && Array.isArray(serverCeps) && serverCeps.length > 0) {
+        return serverCeps;
+      }
+    } catch {}
 
-    return getStored<DeliveryCepRule[]>(STORAGE_KEYS.DELIVERY_CEPS, INITIAL_DELIVERY_CEPS);
+    return [];
   },
 
   saveDeliveryCeps: async (ceps: DeliveryCepRule[]): Promise<void> => {
@@ -1380,7 +1365,7 @@ export const dataStore = {
   // STORE SETTINGS & ADDRESS
   // -------------------------------------------------------------
   getStoreSettings: async (): Promise<StoreSettings> => {
-    // 1. Try Supabase if configured (central shared cloud database)
+    // 1. Try Supabase as the single source of truth
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
@@ -1393,28 +1378,27 @@ export const dataStore = {
 
         if (data && !error) {
           const merged: StoreSettings = {
-            ...DEFAULT_STORE_SETTINGS,
-            id: data.id || DEFAULT_STORE_SETTINGS.id,
-            name: data.name || DEFAULT_STORE_SETTINGS.name,
-            slug: data.slug || DEFAULT_STORE_SETTINGS.slug,
-            description: data.description || DEFAULT_STORE_SETTINGS.description,
-            address: data.address || DEFAULT_STORE_SETTINGS.address,
-            city: data.city || DEFAULT_STORE_SETTINGS.city,
-            state: data.state || DEFAULT_STORE_SETTINGS.state,
-            pickup_address: data.pickup_address || data.address || DEFAULT_STORE_SETTINGS.pickup_address,
+            id: data.id,
+            name: data.name || 'Affeto Pães',
+            slug: data.slug || 'affeto-paes-artesanais',
+            description: data.description || '',
+            address: data.address || '',
+            city: data.city || 'Espera Feliz',
+            state: data.state || 'MG',
+            pickup_address: data.pickup_address || data.address || '',
             logo_url: data.logo_url || DEFAULT_STORE_SETTINGS.logo_url,
-            phone: data.phone || DEFAULT_STORE_SETTINGS.phone,
-            whatsapp: data.whatsapp || DEFAULT_STORE_SETTINGS.whatsapp,
-            pix_key: data.pix_key || DEFAULT_STORE_SETTINGS.pix_key,
-            instagram: data.instagram || DEFAULT_STORE_SETTINGS.instagram,
+            phone: data.phone || '(32) 98468-0513',
+            whatsapp: data.whatsapp || '5532984680513',
+            pix_key: data.pix_key || '',
+            instagram: data.instagram || '@affetopaes',
             is_open: data.is_open ?? true,
-            min_order_value: Number(data.min_order_value || DEFAULT_STORE_SETTINGS.min_order_value),
-            lead_time_minutes: Number(data.lead_time_minutes || DEFAULT_STORE_SETTINGS.lead_time_minutes),
-            fresh_batch_hours: data.fresh_batch_hours || DEFAULT_STORE_SETTINGS.fresh_batch_hours,
-            delivery_schedule_text: data.delivery_schedule_text || DEFAULT_STORE_SETTINGS.delivery_schedule_text,
+            min_order_value: Number(data.min_order_value ?? 15),
+            free_shipping_threshold: Number(data.free_shipping_threshold ?? 120),
+            lead_time_minutes: Number(data.lead_time_minutes ?? 45),
+            fresh_batch_hours: data.fresh_batch_hours || 'Fornadas frescas diárias.',
+            delivery_schedule_text: data.delivery_schedule_text || 'Entregas nas terças e sextas',
             opening_hours: Array.isArray(data.opening_hours) && data.opening_hours.length > 0 ? data.opening_hours : DEFAULT_STORE_SETTINGS.opening_hours,
           };
-          setStored(STORAGE_KEYS.STORE_SETTINGS, merged);
           return merged;
         }
       } catch (err) {
@@ -1422,15 +1406,15 @@ export const dataStore = {
       }
     }
 
-    // 2. Try server API (universal cross-browser persistence for Logo, Address, Store info)
-    const serverSettings = await api.get<StoreSettings>('/api/store-settings');
-    if (serverSettings && serverSettings.name) {
-      setStored(STORAGE_KEYS.STORE_SETTINGS, serverSettings);
-      return serverSettings;
-    }
+    // 2. Try server API as live fallback
+    try {
+      const serverSettings = await api.get<StoreSettings>('/api/store-settings');
+      if (serverSettings && serverSettings.name) {
+        return serverSettings;
+      }
+    } catch {}
 
-    const stored = getStored<StoreSettings>(STORAGE_KEYS.STORE_SETTINGS, DEFAULT_STORE_SETTINGS);
-    return { ...DEFAULT_STORE_SETTINGS, ...stored };
+    throw new Error('Não foi possível carregar as configurações da loja do Supabase.');
   },
 
   saveStoreSettings: async (settings: StoreSettings): Promise<StoreSettings> => {

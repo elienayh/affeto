@@ -70,7 +70,8 @@ export default function App() {
   const [customerCep, setCustomerCep] = useState<string>('');
 
   // Store & delivery settings (Unificada com dados editáveis)
-  const [storeSettings, setStoreSettings] = useState<StoreSettings>(DEFAULT_STORE_SETTINGS);
+  const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [deliveryZones, setDeliveryZones] = useState<DeliveryZone[]>([]);
   const [selectedZoneId, setSelectedZoneId] = useState<string>('zone-1');
   const [coupons, setCoupons] = useState<Coupon[]>([]);
@@ -165,6 +166,7 @@ export default function App() {
   // Initial Data Load
   const loadInitialData = async () => {
     setLoadingCatalog(true);
+    setLoadError(null);
     try {
       // 1. Fetch server runtime configuration so Supabase credentials and database synchronization
       // are active immediately in this and all other browser sessions!
@@ -202,6 +204,9 @@ export default function App() {
           setTrackingOrder(found);
         }
       }
+    } catch (err: any) {
+      console.error('[Affeto Initial Load Error]:', err);
+      setLoadError(err?.message || 'Erro ao carregar dados do Affeto Pães.');
     } finally {
       setLoadingCatalog(false);
     }
@@ -223,6 +228,21 @@ export default function App() {
 
   // Pricing Engine: Calculate live pricing whenever cart, delivery, zone or coupon changes
   const pricing: PricingBreakdown = useMemo(() => {
+    if (!storeSettings) {
+      return {
+        subtotal: 0,
+        discount: 0,
+        delivery_fee: 0,
+        total: 0,
+        items_count: 0,
+        qualifies_for_free_shipping: false,
+        amount_needed_for_free_shipping: 0,
+        applied_coupon: undefined,
+        minimum_order_met: true,
+        minimum_order_value: 0,
+        error: undefined,
+      };
+    }
     const zone = deliveryZones.find((z) => z.id === selectedZoneId);
     return pricingEngine.calculateOrderPricing({
       items: cartItems,
@@ -485,6 +505,71 @@ export default function App() {
     );
   }
 
+  // 1. Error state: clear feedback with retry button
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-[#FAF7F0] flex flex-col items-center justify-center p-6 text-[#3A2E1F]">
+        <div className="max-w-md w-full bg-white rounded-3xl p-8 border border-[#3A2E1F]/10 shadow-xl text-center space-y-6">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-[#B8623F]/10 flex items-center justify-center text-[#B8623F]">
+            <Flame className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="font-serif font-bold text-2xl text-[#3A2E1F]">Não foi possível carregar os dados</h2>
+            <p className="text-sm text-[#7E6C58]">
+              {loadError}
+            </p>
+          </div>
+          <button
+            onClick={() => loadInitialData()}
+            className="w-full py-3.5 bg-[#B8623F] hover:bg-[#9E5132] text-white font-medium rounded-xl transition-all shadow-md active:scale-98 cursor-pointer"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Loading state: single, neutral, smooth skeleton loader before rendering live store
+  if (loadingCatalog || !storeSettings) {
+    return (
+      <div className="min-h-screen bg-[#FAF7F0] flex flex-col">
+        {/* Neutral header skeleton */}
+        <header className="w-full bg-[#FAF7F0]/80 border-b border-[#3A2E1F]/10 backdrop-blur-md sticky top-0 z-30">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-[#3A2E1F]/5 animate-pulse" />
+              <div className="space-y-2">
+                <div className="w-32 h-5 bg-[#3A2E1F]/10 rounded-md animate-pulse" />
+                <div className="w-24 h-3 bg-[#3A2E1F]/5 rounded-md animate-pulse" />
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#3A2E1F]/5 animate-pulse" />
+              <div className="w-10 h-10 rounded-xl bg-[#3A2E1F]/5 animate-pulse" />
+            </div>
+          </div>
+        </header>
+
+        {/* Central warm loading indicator */}
+        <main className="flex-1 flex flex-col items-center justify-center p-6 space-y-6">
+          <div className="relative">
+            <div className="w-16 h-16 rounded-full border-4 border-[#B8623F]/20 border-t-[#B8623F] animate-spin" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Wheat className="w-6 h-6 text-[#B8623F]/80 animate-pulse" />
+            </div>
+          </div>
+          <div className="text-center space-y-2 max-w-sm">
+            <h2 className="font-serif font-bold text-xl text-[#3A2E1F] tracking-tight">Affeto Pães</h2>
+            <p className="text-xs text-[#7E6C58] leading-relaxed">
+              Aquecendo o forno e carregando os pães frescos...
+            </p>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#FAF7F0] text-[#3A2E1F] flex flex-col selection:bg-[#B8623F] selection:text-white">
       {/* Toast Notification */}
@@ -561,14 +646,7 @@ export default function App() {
 
             {/* 3. Demais Itens em Sequência por Categoria */}
             <div id="cardapio-itens-sequencia" className="space-y-12 pt-2">
-              {loadingCatalog ? (
-                <div className="py-20 text-center space-y-3">
-                  <div className="w-10 h-10 border-3 border-[#B8623F] border-t-transparent rounded-full animate-spin mx-auto" />
-                  <p className="text-xs font-serif text-[#7E6C58]">
-                    Aquecendo o forno e carregando os pães frescos...
-                  </p>
-                </div>
-              ) : searchQuery.trim() ? (
+              {searchQuery.trim() ? (
                 /* Exibição de busca quando usuário digita no campo de busca */
                 <section className="space-y-4">
                   <div className="flex items-center justify-between border-b border-[#3A2E1F]/10 pb-2">
