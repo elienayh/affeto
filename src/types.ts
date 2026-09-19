@@ -256,6 +256,7 @@ export interface Order {
   scheduled_date: string; // YYYY-MM-DD
   scheduled_time: string; // HH:mm or '08:00 - 10:00'
   address?: CustomerAddress;
+  delivery_zone_id?: string;
   items: OrderItem[];
   subtotal: number;
   discount: number;

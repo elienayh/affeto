@@ -346,14 +346,33 @@ async function startServer() {
 
   app.patch('/api/orders/:id/payment', (req, res) => {
     try {
-      const { payment_status, external_id } = req.body;
-      const updated = serverStorage.updatePaymentStatus(req.params.id, payment_status, external_id);
+      const { payment_status, external_id, payment_method, notes } = req.body;
+      const updated = serverStorage.updatePaymentStatus(
+        req.params.id,
+        payment_status,
+        external_id,
+        payment_method,
+        notes
+      );
       if (!updated) {
         return res.status(404).json({ error: 'Pedido não encontrado' });
       }
       return res.json(updated);
     } catch (err) {
       return res.status(500).json({ error: 'Erro ao atualizar status de pagamento' });
+    }
+  });
+
+  app.put('/api/orders/:id', (req, res) => {
+    try {
+      const { audit_note, ...orderData } = req.body;
+      const updated = serverStorage.updateOrder(req.params.id, orderData, audit_note);
+      if (!updated) {
+        return res.status(404).json({ error: 'Pedido não encontrado' });
+      }
+      return res.json(updated);
+    } catch (err) {
+      return res.status(500).json({ error: 'Erro ao atualizar pedido completo' });
     }
   });
 

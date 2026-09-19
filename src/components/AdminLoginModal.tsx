@@ -139,7 +139,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="toledodias87@gmail.com"
+                placeholder="e-mail"
                 className="w-full pl-10 pr-3.5 py-2.5 bg-white border border-[#3A2E1F]/20 rounded-xl text-sm text-[#3A2E1F] placeholder:text-[#7E6C58]/60 focus:outline-none focus:ring-2 focus:ring-[#B8623F] focus:border-transparent transition-all"
               />
             </div>

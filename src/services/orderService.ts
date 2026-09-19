@@ -287,8 +287,17 @@ export const orderService = {
   updatePayment: async (
     orderId: string,
     paymentStatus: PaymentStatus,
-    externalId?: string
+    externalId?: string,
+    paymentMethod?: PaymentMethod,
+    notes?: string
   ): Promise<Order | null> => {
-    return dataStore.updatePaymentStatus(orderId, paymentStatus, externalId);
+    return dataStore.updatePaymentStatus(orderId, paymentStatus, externalId, paymentMethod, notes);
+  },
+
+  updateOrder: async (
+    order: Order,
+    auditNote?: string
+  ): Promise<Order | null> => {
+    return dataStore.updateOrder(order, auditNote);
   },
 };

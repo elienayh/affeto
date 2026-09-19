@@ -38,9 +38,26 @@ import {
   DeliveryZone,
   Order,
   OrderStatus,
+  PaymentStatus,
+  PaymentMethod,
   Product,
   StoreSettings,
 } from '../types';
+import { OrderCard } from './admin/OrderCard';
+import { OrderFilters } from './admin/OrderFilters';
+import { OrderDetailsModal } from './admin/OrderDetailsModal';
+import { OrderEditModal } from './admin/OrderEditModal';
+import { OrderCancelModal } from './admin/OrderCancelModal';
+import { OrderListView } from './admin/OrderListView';
+import {
+  OrderFilterState,
+  OrderSortOption,
+  OperationalStage,
+  filterOrders,
+  sortOrders,
+  getOperationalStage,
+  getOperationalStageLabel,
+} from '../utils/orderManagementUtils';
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -80,6 +97,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   // Selected order for detailed modal
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
+  // Order filters, sorting & view mode state
+  const [orderFilters, setOrderFilters] = useState<OrderFilterState>({
+    search: '',
+    operationalStage: 'TODOS',
+    paymentStatus: 'TODOS',
+    dateFilter: 'TODOS',
+    deliveryType: 'TODOS',
+    location: 'TODOS',
+    customerName: 'TODOS',
+    productId: 'TODOS',
+  });
+  const [orderSortOption, setOrderSortOption] = useState<OrderSortOption>('DELIVERY_DATE_ASC');
+  const [orderViewMode, setOrderViewMode] = useState<'kanban' | 'list'>('kanban');
+
+  // Modals for editing and cancelling orders
+  const [orderToEdit, setOrderToEdit] = useState<Order | null>(null);
+  const [orderToCancel, setOrderToCancel] = useState<Order | null>(null);
 
   // Product Create/Edit Modal State
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -251,14 +286,96 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
+  // Payment status updater
+  const handleUpdatePayment = async (
+    order: Order,
+    status: PaymentStatus,
+    method?: PaymentMethod,
+    note?: string
+  ) => {
+    await orderService.updatePayment(order.id, status, undefined, method, note);
+    onOrderUpdated();
+    if (selectedOrder?.id === order.id) {
+      const refreshed = await orderService.getOrderById(order.id);
+      setSelectedOrder(refreshed);
+    }
+  };
+
+  // Order full update (save edited order)
+  const handleSaveEditedOrder = async (updatedOrder: Order, auditNote: string) => {
+    await orderService.updateOrder(updatedOrder, auditNote);
+    onOrderUpdated();
+    if (selectedOrder?.id === updatedOrder.id) {
+      const refreshed = await orderService.getOrderById(updatedOrder.id);
+      setSelectedOrder(refreshed);
+    }
+  };
+
+  // Order cancellation
+  const handleCancelOrder = async (order: Order, reason: string) => {
+    await orderService.updateStatus(
+      order.id,
+      'CANCELLED',
+      'ADMIN_PANEL',
+      `Cancelamento operacional: ${reason}`
+    );
+    onOrderUpdated();
+    if (selectedOrder?.id === order.id) {
+      const refreshed = await orderService.getOrderById(order.id);
+      setSelectedOrder(refreshed);
+    }
+  };
+
+  // Available filters data derived from current orders & rules
+  const availableLocations = React.useMemo(() => {
+    const locs = new Set<string>();
+    orders.forEach((o) => {
+      if (o.address?.neighborhood) locs.add(o.address.neighborhood);
+      if (o.address?.city) locs.add(o.address.city);
+    });
+    ceps.forEach((c) => {
+      if (c.label) locs.add(c.label);
+    });
+    return Array.from(locs).sort();
+  }, [orders, ceps]);
+
+  const availableCustomers = React.useMemo(() => {
+    const custs = new Set<string>();
+    orders.forEach((o) => {
+      if (o.customer_name) custs.add(o.customer_name);
+    });
+    return Array.from(custs).sort();
+  }, [orders]);
+
+  // Filtered & Sorted orders
+  const filteredOrders = React.useMemo(() => {
+    return filterOrders(orders, orderFilters);
+  }, [orders, orderFilters]);
+
+  const sortedOrders = React.useMemo(() => {
+    return sortOrders(filteredOrders, orderSortOption);
+  }, [filteredOrders, orderSortOption]);
+
   // Stats calculation
   const totalRevenue = orders
     .filter((o) => o.payment_status === 'APPROVED')
     .reduce((sum, o) => sum + o.total, 0);
 
-  const pendingCount = orders.filter((o) => o.status === 'PENDING_PAYMENT').length;
-  const preparingCount = orders.filter((o) => o.status === 'PREPARING').length;
-  const confirmedCount = orders.filter((o) => o.status === 'CONFIRMED').length;
+  const pendingPaymentCount = orders.filter(
+    (o) => o.payment_status === 'PENDING' && o.status !== 'CANCELLED'
+  ).length;
+
+  const stageAguardandoCount = orders.filter(
+    (o) => getOperationalStage(o) === 'AGUARDANDO_PREPARO'
+  ).length;
+
+  const stageEmPreparoCount = orders.filter(
+    (o) => getOperationalStage(o) === 'EM_PREPARO'
+  ).length;
+
+  const stageProntoRotaCount = orders.filter(
+    (o) => ['PRONTO', 'EM_ROTA'].includes(getOperationalStage(o))
+  ).length;
 
   // -------------------------------------------------------------
   // FULL SCREEN COMPLETE ADMIN DASHBOARD (Acesso Direto)
@@ -427,215 +544,318 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         {/* KPI Header Bar */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-4 shadow-2xs">
-            <span className="text-[11px] text-[#7E6C58] uppercase font-bold block">Faturamento Total</span>
-            <span className="font-serif font-bold text-xl text-[#3A2E1F]">
+            <span className="text-[11px] text-[#7E6C58] uppercase font-bold block">Faturamento Aprovado</span>
+            <span className="font-serif font-bold text-xl text-emerald-700">
               R$ {totalRevenue.toFixed(2).replace('.', ',')}
+            </span>
+            <span className="text-[10px] text-[#7E6C58] block mt-0.5">
+              {pendingPaymentCount > 0 ? `${pendingPaymentCount} pagamentos pendentes` : 'Sem pendências financeiras'}
             </span>
           </div>
           <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-4 shadow-2xs">
-            <span className="text-[11px] text-[#7E6C58] uppercase font-bold block">Aguardando Pagamento</span>
-            <span className="font-serif font-bold text-xl text-amber-600">{pendingCount}</span>
-          </div>
-          <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-4 shadow-2xs">
-            <span className="text-[11px] text-[#7E6C58] uppercase font-bold block">Confirmados / Fornada</span>
-            <span className="font-serif font-bold text-xl text-[#B8623F]">{confirmedCount}</span>
+            <span className="text-[11px] text-[#7E6C58] uppercase font-bold block">Aguardando Preparo</span>
+            <span className="font-serif font-bold text-xl text-amber-600">{stageAguardandoCount}</span>
+            <span className="text-[10px] text-[#7E6C58] block mt-0.5">Prontos para entrar em produção</span>
           </div>
           <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-4 shadow-2xs">
             <span className="text-[11px] text-[#7E6C58] uppercase font-bold block">Em Preparo / Forno</span>
-            <span className="font-serif font-bold text-xl text-emerald-600">{preparingCount}</span>
+            <span className="font-serif font-bold text-xl text-[#B8623F]">{stageEmPreparoCount}</span>
+            <span className="text-[10px] text-[#7E6C58] block mt-0.5">Fornadas em andamento</span>
+          </div>
+          <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-4 shadow-2xs">
+            <span className="text-[11px] text-[#7E6C58] uppercase font-bold block">Pronto & Em Rota</span>
+            <span className="font-serif font-bold text-xl text-purple-700">{stageProntoRotaCount}</span>
+            <span className="text-[10px] text-[#7E6C58] block mt-0.5">Para despacho ou retirada</span>
           </div>
         </div>
 
         {/* ------------------------------------------------------------- */}
-        {/* TAB 1: PEDIDOS & KANBAN */}
+        {/* TAB 1: GESTÃO COMPLETA DE PEDIDOS (OPERACIONAL & DESVINCULADA) */}
         {/* ------------------------------------------------------------- */}
         {activeTab === 'orders' && (
           <div className="space-y-4">
-            <div className="flex justify-between items-center">
+            {/* Barra de Título */}
+            <div className="flex flex-wrap justify-between items-center gap-3">
               <div>
                 <h2 className="font-serif font-bold text-xl text-[#3A2E1F]">
-                  Painel de Pedidos & Esteira de Fornadas
+                  Gestão Operacional de Pedidos & Fornadas
                 </h2>
                 <p className="text-xs text-[#7E6C58]">
-                  Acompanhe os pedidos em tempo real e avance as etapas de preparo e entrega.
+                  Fluxo operacional contínuo independente da confirmação financeira.
                 </p>
               </div>
               <button
                 onClick={onOrderUpdated}
-                className="px-3 py-1.5 rounded-xl border border-[#3A2E1F]/20 text-xs font-medium hover:bg-white flex items-center gap-1.5 cursor-pointer"
+                className="px-3 py-1.5 rounded-xl border border-[#3A2E1F]/20 bg-white hover:bg-[#FAF7F0] text-xs font-semibold text-[#3A2E1F] flex items-center gap-1.5 cursor-pointer shadow-2xs transition-all"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span>Atualizar</span>
+                <span>Atualizar Pedidos</span>
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              {/* Coluna 1: Pendentes */}
-              <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-3.5 space-y-3">
-                <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
-                  <h3 className="font-bold text-xs text-[#3A2E1F] flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-amber-500" />
-                    <span>Aguardando Pagamento</span>
-                  </h3>
-                  <span className="text-[11px] font-bold bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full">
-                    {orders.filter((o) => o.status === 'PENDING_PAYMENT').length}
-                  </span>
-                </div>
-                <div className="space-y-2.5">
-                  {orders
-                    .filter((o) => o.status === 'PENDING_PAYMENT')
-                    .map((o) => (
-                      <div
-                        key={o.id}
-                        onClick={() => setSelectedOrder(o)}
-                        className="p-3 bg-[#FAF7F0] hover:bg-[#F3ECDD] border border-[#3A2E1F]/10 rounded-xl cursor-pointer transition-all text-xs space-y-1.5"
-                      >
-                        <div className="flex justify-between font-mono font-bold text-[#3A2E1F]">
-                          <span>{o.code}</span>
-                          <span className="text-[#B8623F]">R$ {o.total.toFixed(2)}</span>
-                        </div>
-                        <p className="font-semibold text-[#3A2E1F] truncate">{o.customer_name}</p>
-                        <div className="text-[11px] text-[#7E6C58]">
-                          {o.items.length} itens • {o.delivery_type === 'DELIVERY' ? 'Entrega' : 'Retirada'}
-                        </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleAdvanceStatus(o, 'CONFIRMED', 'Pagamento aprovado manualmente pelo admin');
-                          }}
-                          className="w-full mt-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold"
-                        >
-                          Confirmar Pagamento
-                        </button>
-                      </div>
-                    ))}
-                </div>
-              </div>
+            {/* Barra de Busca Universal e Filtros Combináveis */}
+            <OrderFilters
+              filters={orderFilters}
+              onFilterChange={setOrderFilters}
+              onResetFilters={() =>
+                setOrderFilters({
+                  search: '',
+                  operationalStage: 'TODOS',
+                  paymentStatus: 'TODOS',
+                  dateFilter: 'TODOS',
+                  deliveryType: 'TODOS',
+                  location: 'TODOS',
+                  customerName: 'TODOS',
+                  productId: 'TODOS',
+                })
+              }
+              sortOption={orderSortOption}
+              onSortChange={setOrderSortOption}
+              viewMode={orderViewMode}
+              onViewModeChange={setOrderViewMode}
+              availableProducts={products}
+              availableLocations={availableLocations}
+              availableCustomers={availableCustomers}
+              totalOrdersCount={orders.length}
+              filteredOrdersCount={sortedOrders.length}
+            />
 
-              {/* Coluna 2: Confirmados / Aguardando Fornada */}
-              <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-3.5 space-y-3">
-                <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
-                  <h3 className="font-bold text-xs text-[#3A2E1F] flex items-center gap-1.5">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-blue-500" />
-                    <span>Confirmados (Fornada)</span>
-                  </h3>
-                  <span className="text-[11px] font-bold bg-blue-50 text-blue-800 px-2 py-0.5 rounded-full">
-                    {orders.filter((o) => o.status === 'CONFIRMED').length}
-                  </span>
-                </div>
-                <div className="space-y-2.5">
-                  {orders
-                    .filter((o) => o.status === 'CONFIRMED')
-                    .map((o) => (
-                      <div
-                        key={o.id}
-                        onClick={() => setSelectedOrder(o)}
-                        className="p-3 bg-[#FAF7F0] hover:bg-[#F3ECDD] border border-[#3A2E1F]/10 rounded-xl cursor-pointer transition-all text-xs space-y-1.5"
-                      >
-                        <div className="flex justify-between font-mono font-bold text-[#3A2E1F]">
-                          <span>{o.code}</span>
-                          <span className="text-[#B8623F]">R$ {o.total.toFixed(2)}</span>
+            {/* MODO LISTA / TABELA */}
+            {orderViewMode === 'list' ? (
+              <OrderListView
+                orders={sortedOrders}
+                onViewDetails={(ord) => setSelectedOrder(ord)}
+                onEditOrder={(ord) => setOrderToEdit(ord)}
+                onCancelOrder={(ord) => setOrderToCancel(ord)}
+                onAdvanceStatus={handleAdvanceStatus}
+                onUpdatePayment={handleUpdatePayment}
+              />
+            ) : (
+              /* MODO KANBAN: 5 COLUNAS OPERACIONAIS */
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3.5 items-start">
+                {/* 1. AGUARDANDO PREPARO */}
+                {(() => {
+                  const columnOrders = sortedOrders.filter(
+                    (o) => getOperationalStage(o) === 'AGUARDANDO_PREPARO'
+                  );
+                  return (
+                    <div className="bg-white/70 border border-[#3A2E1F]/15 rounded-2xl p-3 space-y-3 shadow-2xs">
+                      <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
+                        <div className="flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-amber-600" />
+                          <h3 className="font-bold text-xs text-[#3A2E1F]">Aguardando Preparo</h3>
                         </div>
-                        <p className="font-semibold text-[#3A2E1F] truncate">{o.customer_name}</p>
-                        <div className="text-[11px] text-[#7E6C58]">
-                          📅 Data: {o.scheduled_date} ({o.scheduled_time})
-                        </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleAdvanceStatus(o, 'PREPARING', 'Iniciado preparo e fermentação dos pães');
-                          }}
-                          className="w-full mt-2 py-1.5 bg-[#B8623F] hover:bg-[#994E30] text-white rounded-lg text-[10px] font-bold"
-                        >
-                          Iniciar Preparo
-                        </button>
+                        <span className="text-[11px] font-bold bg-amber-100/70 text-amber-800 px-2 py-0.5 rounded-full">
+                          {columnOrders.length}
+                        </span>
                       </div>
-                    ))}
-                </div>
-              </div>
-
-              {/* Coluna 3: Em Preparo / Forno */}
-              <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-3.5 space-y-3">
-                <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
-                  <h3 className="font-bold text-xs text-[#3A2E1F] flex items-center gap-1.5">
-                    <Store className="w-3.5 h-3.5 text-amber-600" />
-                    <span>No Forno / Preparando</span>
-                  </h3>
-                  <span className="text-[11px] font-bold bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full">
-                    {orders.filter((o) => o.status === 'PREPARING').length}
-                  </span>
-                </div>
-                <div className="space-y-2.5">
-                  {orders
-                    .filter((o) => o.status === 'PREPARING')
-                    .map((o) => (
-                      <div
-                        key={o.id}
-                        onClick={() => setSelectedOrder(o)}
-                        className="p-3 bg-[#FAF7F0] hover:bg-[#F3ECDD] border border-[#3A2E1F]/10 rounded-xl cursor-pointer transition-all text-xs space-y-1.5"
-                      >
-                        <div className="flex justify-between font-mono font-bold text-[#3A2E1F]">
-                          <span>{o.code}</span>
-                          <span className="text-[#B8623F]">R$ {o.total.toFixed(2)}</span>
-                        </div>
-                        <p className="font-semibold text-[#3A2E1F] truncate">{o.customer_name}</p>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const next = o.delivery_type === 'DELIVERY' ? 'OUT_FOR_DELIVERY' : 'READY';
-                            handleAdvanceStatus(o, next, 'Pães assados e prontos para envio ou retirada');
-                          }}
-                          className="w-full mt-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold"
-                        >
-                          {o.delivery_type === 'DELIVERY' ? 'Despachar Entrega' : 'Pronto para Retirada'}
-                        </button>
-                      </div>
-                    ))}
-                </div>
-              </div>
-
-              {/* Coluna 4: Pronto / Em Rota / Entregue */}
-              <div className="bg-white border border-[#3A2E1F]/10 rounded-2xl p-3.5 space-y-3">
-                <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
-                  <h3 className="font-bold text-xs text-[#3A2E1F] flex items-center gap-1.5">
-                    <Truck className="w-3.5 h-3.5 text-purple-600" />
-                    <span>Pronto / Em Rota / Final</span>
-                  </h3>
-                  <span className="text-[11px] font-bold bg-purple-50 text-purple-800 px-2 py-0.5 rounded-full">
-                    {orders.filter((o) => ['READY', 'OUT_FOR_DELIVERY', 'DELIVERED', 'PICKED_UP'].includes(o.status)).length}
-                  </span>
-                </div>
-                <div className="space-y-2.5">
-                  {orders
-                    .filter((o) => ['READY', 'OUT_FOR_DELIVERY', 'DELIVERED', 'PICKED_UP'].includes(o.status))
-                    .map((o) => (
-                      <div
-                        key={o.id}
-                        onClick={() => setSelectedOrder(o)}
-                        className="p-3 bg-[#FAF7F0] hover:bg-[#F3ECDD] border border-[#3A2E1F]/10 rounded-xl cursor-pointer transition-all text-xs space-y-1.5"
-                      >
-                        <div className="flex justify-between font-mono font-bold text-[#3A2E1F]">
-                          <span>{o.code}</span>
-                          <span className="text-[10px] uppercase font-bold text-[#7E6C58]">{o.status}</span>
-                        </div>
-                        <p className="font-semibold text-[#3A2E1F] truncate">{o.customer_name}</p>
-                        {(o.status === 'READY' || o.status === 'OUT_FOR_DELIVERY') && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const next = o.delivery_type === 'DELIVERY' ? 'DELIVERED' : 'PICKED_UP';
-                              handleAdvanceStatus(o, next, 'Entregue ao cliente com sucesso');
-                            }}
-                            className="w-full py-1.5 bg-[#3A2E1F] hover:bg-[#554432] text-white rounded-lg text-[10px] font-bold"
-                          >
-                            Finalizar Entrega
-                          </button>
+                      <div className="space-y-2.5 min-h-[140px]">
+                        {columnOrders.length === 0 ? (
+                          <div className="py-8 text-center text-[11px] text-[#7E6C58]/70 italic">
+                            Nenhum pedido aguardando
+                          </div>
+                        ) : (
+                          columnOrders.map((ord) => (
+                            <OrderCard
+                              key={ord.id}
+                              order={ord}
+                              onViewDetails={(o) => setSelectedOrder(o)}
+                              onEditOrder={(o) => setOrderToEdit(o)}
+                              onCancelOrder={(o) => setOrderToCancel(o)}
+                              onAdvanceStatus={handleAdvanceStatus}
+                              onUpdatePayment={handleUpdatePayment}
+                            />
+                          ))
                         )}
                       </div>
-                    ))}
-                </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 2. EM PREPARO */}
+                {(() => {
+                  const columnOrders = sortedOrders.filter(
+                    (o) => getOperationalStage(o) === 'EM_PREPARO'
+                  );
+                  return (
+                    <div className="bg-white/70 border border-[#3A2E1F]/15 rounded-2xl p-3 space-y-3 shadow-2xs">
+                      <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
+                        <div className="flex items-center gap-1.5">
+                          <Package className="w-3.5 h-3.5 text-[#B8623F]" />
+                          <h3 className="font-bold text-xs text-[#3A2E1F]">Em Preparo</h3>
+                        </div>
+                        <span className="text-[11px] font-bold bg-[#B8623F]/15 text-[#994E30] px-2 py-0.5 rounded-full">
+                          {columnOrders.length}
+                        </span>
+                      </div>
+                      <div className="space-y-2.5 min-h-[140px]">
+                        {columnOrders.length === 0 ? (
+                          <div className="py-8 text-center text-[11px] text-[#7E6C58]/70 italic">
+                            Nenhum pedido em forno
+                          </div>
+                        ) : (
+                          columnOrders.map((ord) => (
+                            <OrderCard
+                              key={ord.id}
+                              order={ord}
+                              onViewDetails={(o) => setSelectedOrder(o)}
+                              onEditOrder={(o) => setOrderToEdit(o)}
+                              onCancelOrder={(o) => setOrderToCancel(o)}
+                              onAdvanceStatus={handleAdvanceStatus}
+                              onUpdatePayment={handleUpdatePayment}
+                            />
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 3. PRONTO */}
+                {(() => {
+                  const columnOrders = sortedOrders.filter(
+                    (o) => getOperationalStage(o) === 'PRONTO'
+                  );
+                  return (
+                    <div className="bg-white/70 border border-[#3A2E1F]/15 rounded-2xl p-3 space-y-3 shadow-2xs">
+                      <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
+                        <div className="flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />
+                          <h3 className="font-bold text-xs text-[#3A2E1F]">Pronto</h3>
+                        </div>
+                        <span className="text-[11px] font-bold bg-blue-100/70 text-blue-800 px-2 py-0.5 rounded-full">
+                          {columnOrders.length}
+                        </span>
+                      </div>
+                      <div className="space-y-2.5 min-h-[140px]">
+                        {columnOrders.length === 0 ? (
+                          <div className="py-8 text-center text-[11px] text-[#7E6C58]/70 italic">
+                            Nenhum pedido pronto
+                          </div>
+                        ) : (
+                          columnOrders.map((ord) => (
+                            <OrderCard
+                              key={ord.id}
+                              order={ord}
+                              onViewDetails={(o) => setSelectedOrder(o)}
+                              onEditOrder={(o) => setOrderToEdit(o)}
+                              onCancelOrder={(o) => setOrderToCancel(o)}
+                              onAdvanceStatus={handleAdvanceStatus}
+                              onUpdatePayment={handleUpdatePayment}
+                            />
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 4. EM ROTA / BALCÃO */}
+                {(() => {
+                  const columnOrders = sortedOrders.filter(
+                    (o) => getOperationalStage(o) === 'EM_ROTA'
+                  );
+                  return (
+                    <div className="bg-white/70 border border-[#3A2E1F]/15 rounded-2xl p-3 space-y-3 shadow-2xs">
+                      <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
+                        <div className="flex items-center gap-1.5">
+                          <Truck className="w-3.5 h-3.5 text-purple-600" />
+                          <h3 className="font-bold text-xs text-[#3A2E1F]">Em Rota</h3>
+                        </div>
+                        <span className="text-[11px] font-bold bg-purple-100/70 text-purple-800 px-2 py-0.5 rounded-full">
+                          {columnOrders.length}
+                        </span>
+                      </div>
+                      <div className="space-y-2.5 min-h-[140px]">
+                        {columnOrders.length === 0 ? (
+                          <div className="py-8 text-center text-[11px] text-[#7E6C58]/70 italic">
+                            Nenhum pedido em trânsito
+                          </div>
+                        ) : (
+                          columnOrders.map((ord) => (
+                            <OrderCard
+                              key={ord.id}
+                              order={ord}
+                              onViewDetails={(o) => setSelectedOrder(o)}
+                              onEditOrder={(o) => setOrderToEdit(o)}
+                              onCancelOrder={(o) => setOrderToCancel(o)}
+                              onAdvanceStatus={handleAdvanceStatus}
+                              onUpdatePayment={handleUpdatePayment}
+                            />
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 5. ENTREGUE */}
+                {(() => {
+                  const columnOrders = sortedOrders.filter(
+                    (o) => getOperationalStage(o) === 'ENTREGUE'
+                  );
+                  return (
+                    <div className="bg-white/70 border border-[#3A2E1F]/15 rounded-2xl p-3 space-y-3 shadow-2xs">
+                      <div className="flex justify-between items-center pb-2 border-b border-[#3A2E1F]/10">
+                        <div className="flex items-center gap-1.5">
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <h3 className="font-bold text-xs text-[#3A2E1F]">Entregue</h3>
+                        </div>
+                        <span className="text-[11px] font-bold bg-emerald-100/70 text-emerald-800 px-2 py-0.5 rounded-full">
+                          {columnOrders.length}
+                        </span>
+                      </div>
+                      <div className="space-y-2.5 min-h-[140px]">
+                        {columnOrders.length === 0 ? (
+                          <div className="py-8 text-center text-[11px] text-[#7E6C58]/70 italic">
+                            Nenhum pedido finalizado
+                          </div>
+                        ) : (
+                          columnOrders.map((ord) => (
+                            <OrderCard
+                              key={ord.id}
+                              order={ord}
+                              onViewDetails={(o) => setSelectedOrder(o)}
+                              onEditOrder={(o) => setOrderToEdit(o)}
+                              onCancelOrder={(o) => setOrderToCancel(o)}
+                              onAdvanceStatus={handleAdvanceStatus}
+                              onUpdatePayment={handleUpdatePayment}
+                            />
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 6. COLUNA EXTRA: CANCELADOS (se selecionado no filtro ou houver cancelados) */}
+                {orderFilters.operationalStage === 'CANCELADO' && (
+                  <div className="bg-rose-50/40 border border-rose-200 rounded-2xl p-3 space-y-3 shadow-2xs">
+                    <div className="flex justify-between items-center pb-2 border-b border-rose-200">
+                      <h3 className="font-bold text-xs text-rose-800">Cancelados</h3>
+                      <span className="text-[11px] font-bold bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full">
+                        {sortedOrders.filter((o) => getOperationalStage(o) === 'CANCELADO').length}
+                      </span>
+                    </div>
+                    <div className="space-y-2.5">
+                      {sortedOrders
+                        .filter((o) => getOperationalStage(o) === 'CANCELADO')
+                        .map((ord) => (
+                          <OrderCard
+                            key={ord.id}
+                            order={ord}
+                            onViewDetails={(o) => setSelectedOrder(o)}
+                            onEditOrder={(o) => setOrderToEdit(o)}
+                            onCancelOrder={(o) => setOrderToCancel(o)}
+                            onAdvanceStatus={handleAdvanceStatus}
+                            onUpdatePayment={handleUpdatePayment}
+                          />
+                        ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
+            )}
           </div>
         )}
 
@@ -1938,72 +2158,50 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       )}
 
       {/* ------------------------------------------------------------- */}
-      {/* MODAL 4: DETALHES DO PEDIDO & AUDITORIA */}
+      {/* MODAL 4: DETALHES COMPLETOS DO PEDIDO & AUDITORIA */}
       {/* ------------------------------------------------------------- */}
       {selectedOrder && (
-        <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-white border border-[#3A2E1F]/15 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-start">
-              <div>
-                <span className="text-[10px] font-bold text-[#B8623F] uppercase">Detalhes do Pedido</span>
-                <h3 className="font-serif font-bold text-xl text-[#3A2E1F]">{selectedOrder.code}</h3>
-              </div>
-              <button
-                onClick={() => setSelectedOrder(null)}
-                className="p-1.5 rounded-full hover:bg-black/5 text-[#7E6C58]"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+        <OrderDetailsModal
+          order={selectedOrder}
+          onClose={() => setSelectedOrder(null)}
+          onEditOrder={(ord) => {
+            setSelectedOrder(null);
+            setOrderToEdit(ord);
+          }}
+          onCancelOrder={(ord) => {
+            setSelectedOrder(null);
+            setOrderToCancel(ord);
+          }}
+          onAdvanceStatus={handleAdvanceStatus}
+          onUpdatePayment={handleUpdatePayment}
+          storePhone={storeSettings?.phone}
+        />
+      )}
 
-            <div className="p-3.5 bg-[#FAF7F0] rounded-2xl space-y-1.5 text-xs text-[#554432]">
-              <div className="flex justify-between">
-                <span>Cliente:</span>
-                <span className="font-bold text-[#3A2E1F]">{selectedOrder.customer_name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Telefone:</span>
-                <span>{selectedOrder.customer_phone}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Horário Agendado:</span>
-                <span className="font-semibold text-[#3A2E1F]">{selectedOrder.scheduled_time}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Status Atual:</span>
-                <span className="font-bold text-[#B8623F]">{selectedOrder.status}</span>
-              </div>
-            </div>
+      {/* ------------------------------------------------------------- */}
+      {/* MODAL 5: EDIÇÃO COMPLETA DO PEDIDO */}
+      {/* ------------------------------------------------------------- */}
+      {orderToEdit && (
+        <OrderEditModal
+          order={orderToEdit}
+          onClose={() => setOrderToEdit(null)}
+          onSave={handleSaveEditedOrder}
+          availableProducts={products}
+          availableZones={zones}
+          availableCepRules={ceps}
+          availableCoupons={coupons}
+        />
+      )}
 
-            {/* Items */}
-            <div className="space-y-1.5">
-              <h4 className="font-bold text-xs text-[#3A2E1F]">Itens</h4>
-              <div className="border border-[#3A2E1F]/10 rounded-xl divide-y text-xs">
-                {selectedOrder.items.map((it) => (
-                  <div key={it.id} className="p-2.5 flex justify-between">
-                    <span>{it.quantity}x {it.product_name}</span>
-                    <span className="font-bold">R$ {it.subtotal.toFixed(2)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Audit history */}
-            {selectedOrder.status_history && (
-              <div className="space-y-1.5">
-                <h4 className="font-bold text-xs text-[#3A2E1F]">Histórico de Auditoria</h4>
-                <div className="space-y-1 text-[11px] text-[#7E6C58]">
-                  {selectedOrder.status_history.map((h) => (
-                    <div key={h.id} className="p-2 bg-gray-50 rounded-lg flex justify-between">
-                      <span>{h.new_status} ({h.changed_by})</span>
-                      <span className="text-[10px]">{new Date(h.created_at).toLocaleTimeString()}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+      {/* ------------------------------------------------------------- */}
+      {/* MODAL 6: CANCELAMENTO OPERACIONAL DO PEDIDO */}
+      {/* ------------------------------------------------------------- */}
+      {orderToCancel && (
+        <OrderCancelModal
+          order={orderToCancel}
+          onClose={() => setOrderToCancel(null)}
+          onConfirm={handleCancelOrder}
+        />
       )}
     </div>
   );

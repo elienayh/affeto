@@ -13,6 +13,7 @@ import {
   OrderItem,
   OrderStatus,
   OrderStatusHistoryItem,
+  PaymentMethod,
   PaymentStatus,
   ProductionBatch,
   Product,
@@ -1320,24 +1321,51 @@ export const dataStore = {
   updatePaymentStatus: async (
     orderId: string,
     paymentStatus: Order['payment_status'],
-    externalId?: string
+    externalId?: string,
+    paymentMethod?: PaymentMethod,
+    notes?: string
   ): Promise<Order | null> => {
     const orders = getStored<Order[]>(STORAGE_KEYS.ORDERS, []);
     const idx = orders.findIndex((o) => o.id === orderId || toUuid(o.id) === toUuid(orderId));
     if (idx === -1) return null;
 
     const order = orders[idx];
+    const prevPayment = order.payment_status;
     order.payment_status = paymentStatus;
-    if (paymentStatus === 'APPROVED' && order.status === 'PENDING_PAYMENT') {
-      order.status = 'CONFIRMED';
+    if (paymentMethod) {
+      order.payment_method = paymentMethod;
     }
+    // EIXO INDEPENDENTE: Não altera order.status operacional!
     order.updated_at = new Date().toISOString();
 
     if (order.payment) {
       order.payment.status = paymentStatus;
+      if (paymentMethod) order.payment.method = paymentMethod;
       if (externalId) order.payment.external_id = externalId;
       order.payment.updated_at = new Date().toISOString();
+    } else if (paymentMethod) {
+      order.payment = {
+        id: `pay-${Date.now()}`,
+        order_id: order.id,
+        provider: 'MANUAL',
+        method: paymentMethod,
+        amount: order.total,
+        status: paymentStatus,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
     }
+
+    if (!order.status_history) order.status_history = [];
+    order.status_history.push({
+      id: `hist-pay-${Date.now()}`,
+      order_id: order.id,
+      previous_status: null,
+      new_status: order.status,
+      changed_by: 'ADMIN_FINANCEIRO',
+      notes: notes || `Pagamento atualizado de ${prevPayment} para ${paymentStatus}${paymentMethod ? ` (${paymentMethod})` : ''}`,
+      created_at: new Date().toISOString(),
+    });
 
     orders[idx] = order;
     setStored(STORAGE_KEYS.ORDERS, orders);
@@ -1346,6 +1374,8 @@ export const dataStore = {
     await api.patch(`/api/orders/${order.id}/payment`, {
       payment_status: paymentStatus,
       external_id: externalId,
+      payment_method: paymentMethod,
+      notes,
     });
 
     const supabase = getSupabaseClient();
@@ -1353,12 +1383,120 @@ export const dataStore = {
       try {
         await supabase
           .from('orders')
-          .update({ payment_status: paymentStatus, status: order.status, updated_at: order.updated_at })
+          .update({ payment_status: paymentStatus, updated_at: order.updated_at })
           .eq('id', toUuid(order.id));
       } catch {}
     }
 
     return order;
+  },
+
+  updateOrder: async (updatedOrder: Order, auditNote?: string): Promise<Order> => {
+    const orders = getStored<Order[]>(STORAGE_KEYS.ORDERS, []);
+    const idx = orders.findIndex((o) => o.id === updatedOrder.id || toUuid(o.id) === toUuid(updatedOrder.id));
+
+    const updatedWithTimestamp: Order = {
+      ...updatedOrder,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (auditNote) {
+      if (!updatedWithTimestamp.status_history) updatedWithTimestamp.status_history = [];
+      updatedWithTimestamp.status_history.push({
+        id: `hist-edit-${Date.now()}`,
+        order_id: updatedWithTimestamp.id,
+        previous_status: null,
+        new_status: updatedWithTimestamp.status,
+        changed_by: 'ADMIN_EDICAO',
+        notes: auditNote,
+        created_at: new Date().toISOString(),
+      });
+    }
+
+    if (idx !== -1) {
+      orders[idx] = updatedWithTimestamp;
+    } else {
+      orders.unshift(updatedWithTimestamp);
+    }
+    setStored(STORAGE_KEYS.ORDERS, orders);
+
+    // 1. Sync to server API
+    await api.put(`/api/orders/${updatedWithTimestamp.id}`, {
+      ...updatedWithTimestamp,
+      audit_note: auditNote,
+    });
+
+    // 2. Sync to Supabase
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const orderUuid = toUuid(updatedWithTimestamp.id);
+
+        // Update address if exists
+        let addressId: string | null = null;
+        if (updatedWithTimestamp.address && updatedWithTimestamp.delivery_type === 'DELIVERY') {
+          try {
+            const { data: addr } = await supabase
+              .from('addresses')
+              .upsert({
+                customer_id: SYSTEM_CUSTOMER_ID,
+                label: `Entrega Pedido ${updatedWithTimestamp.code}`,
+                zip_code: updatedWithTimestamp.address.zip_code || '36000-000',
+                street: updatedWithTimestamp.address.street || '',
+                number: updatedWithTimestamp.address.number || '',
+                neighborhood: updatedWithTimestamp.address.neighborhood || '',
+                city: updatedWithTimestamp.address.city || 'Juiz de Fora',
+                complement: updatedWithTimestamp.address.complement || '',
+              })
+              .select()
+              .single();
+            if (addr) addressId = addr.id;
+          } catch {}
+        }
+
+        // Update order record
+        await supabase.from('orders').upsert({
+          id: orderUuid,
+          customer_id: SYSTEM_CUSTOMER_ID,
+          fulfillment_type: updatedWithTimestamp.delivery_type === 'PICKUP' ? 'PICKUP' : 'DELIVERY',
+          address_id: addressId,
+          subtotal: updatedWithTimestamp.subtotal,
+          discount: updatedWithTimestamp.discount || 0,
+          delivery_fee: updatedWithTimestamp.delivery_fee || 0,
+          total: updatedWithTimestamp.total,
+          status: updatedWithTimestamp.status,
+          payment_status: updatedWithTimestamp.payment_status,
+          scheduled_for: updatedWithTimestamp.scheduled_date
+            ? new Date(`${updatedWithTimestamp.scheduled_date}T12:00:00Z`).toISOString()
+            : null,
+          updated_at: updatedWithTimestamp.updated_at,
+        });
+
+        // Upsert order items
+        if (updatedWithTimestamp.items && updatedWithTimestamp.items.length > 0) {
+          const itemsPayload = updatedWithTimestamp.items.map((it) => ({
+            id: toUuid(it.id),
+            order_id: orderUuid,
+            product_id: toUuid(it.product_id),
+            quantity: it.quantity,
+            unit_price: it.unit_price,
+          }));
+          await supabase.from('order_items').upsert(itemsPayload, { onConflict: 'id' });
+        }
+
+        if (auditNote) {
+          await supabase.from('order_status_history').insert({
+            order_id: orderUuid,
+            status: updatedWithTimestamp.status,
+            changed_at: new Date().toISOString(),
+          });
+        }
+      } catch (err) {
+        console.warn('[Supabase Order Update error, saved locally & server]:', err);
+      }
+    }
+
+    return updatedWithTimestamp;
   },
 
   // -------------------------------------------------------------

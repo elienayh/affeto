@@ -18,6 +18,7 @@ import {
   DeliveryZone,
   Order,
   OrderStatus,
+  PaymentMethod,
   PaymentRecord,
   PaymentStatus,
   ProductionBatch,
@@ -362,26 +363,88 @@ class ServerStorage {
     return order;
   }
 
-  public updatePaymentStatus(orderId: string, paymentStatus: PaymentStatus, externalId?: string): Order | null {
+  public updatePaymentStatus(
+    orderId: string,
+    paymentStatus: PaymentStatus,
+    externalId?: string,
+    paymentMethod?: PaymentMethod,
+    note?: string
+  ): Order | null {
     const idx = this.data.orders.findIndex((o) => o.id === orderId);
     if (idx === -1) return null;
 
     const order = this.data.orders[idx];
+    const prevPaymentStatus = order.payment_status;
     order.payment_status = paymentStatus;
-    if (paymentStatus === 'APPROVED' && order.status === 'PENDING_PAYMENT') {
-      order.status = 'CONFIRMED';
+    if (paymentMethod) {
+      order.payment_method = paymentMethod;
     }
     order.updated_at = new Date().toISOString();
 
     if (order.payment) {
       order.payment.status = paymentStatus;
+      if (paymentMethod) order.payment.method = paymentMethod;
       if (externalId) order.payment.external_id = externalId;
       order.payment.updated_at = new Date().toISOString();
+    } else if (paymentMethod) {
+      order.payment = {
+        id: `pay-${Date.now()}`,
+        order_id: order.id,
+        provider: 'MANUAL',
+        method: paymentMethod,
+        amount: order.total,
+        status: paymentStatus,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
     }
+
+    if (!order.status_history) order.status_history = [];
+    order.status_history.push({
+      id: `hist-pay-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      order_id: order.id,
+      previous_status: null,
+      new_status: order.status,
+      changed_by: 'ADMIN_FINANCEIRO',
+      notes: note || `Pagamento atualizado de ${prevPaymentStatus} para ${paymentStatus}${paymentMethod ? ` (${paymentMethod})` : ''}`,
+      created_at: new Date().toISOString(),
+    });
 
     this.data.orders[idx] = order;
     this.saveDataToFile();
     return order;
+  }
+
+  public updateOrder(orderId: string, updatedData: Partial<Order>, auditNote?: string): Order | null {
+    const idx = this.data.orders.findIndex((o) => o.id === orderId);
+    if (idx === -1) return null;
+
+    const current = this.data.orders[idx];
+    const merged: Order = {
+      ...current,
+      ...updatedData,
+      id: current.id,
+      code: current.code,
+      created_at: current.created_at,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (!merged.status_history) merged.status_history = [];
+    if (auditNote) {
+      merged.status_history.push({
+        id: `hist-edit-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        order_id: current.id,
+        previous_status: current.status,
+        new_status: merged.status,
+        changed_by: 'ADMIN_PANEL',
+        notes: auditNote,
+        created_at: new Date().toISOString(),
+      });
+    }
+
+    this.data.orders[idx] = merged;
+    this.saveDataToFile();
+    return merged;
   }
 
   // -----------------------------------------------------------------
