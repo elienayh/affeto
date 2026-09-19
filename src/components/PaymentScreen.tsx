@@ -12,6 +12,8 @@ import {
   MessageCircle,
   QrCode,
   Lock,
+  Banknote,
+  Truck,
 } from 'lucide-react';
 import { getWhatsAppOrderUrl, BAKERY_WHATSAPP_NUMBER } from '../lib/whatsappSummary';
 import { paymentService } from '../services/paymentService';
@@ -42,11 +44,21 @@ export const PaymentScreen: React.FC<PaymentScreenProps> = ({
   const [checkFeedback, setCheckFeedback] = useState<string | null>(null);
 
   const isApproved = currentOrder.payment_status === 'APPROVED';
+  const isPayOnDelivery =
+    paymentMethod === 'PAY_ON_DELIVERY' ||
+    paymentMethod === 'CASH_ON_DELIVERY' ||
+    paymentMethod === 'DEBIT_CARD' ||
+    currentOrder.payment_method === 'PAY_ON_DELIVERY';
 
-  // Inicializa o registro de cobrança real no Mercado Pago
+  // Inicializa o registro de cobrança
   useEffect(() => {
     let mounted = true;
     const initPayment = async () => {
+      if (isPayOnDelivery) {
+        setIsLoadingPayment(false);
+        return;
+      }
+
       if (!payment) {
         setIsLoadingPayment(true);
         try {
@@ -64,11 +76,11 @@ export const PaymentScreen: React.FC<PaymentScreenProps> = ({
     return () => {
       mounted = false;
     };
-  }, [order, paymentMethod]);
+  }, [order, paymentMethod, isPayOnDelivery]);
 
   // Função de verificação de status no servidor/Mercado Pago
   const verifyPaymentStatus = useCallback(async (isManual = false) => {
-    if (isApproved) return;
+    if (isApproved || isPayOnDelivery) return;
     if (isManual) {
       setIsCheckingStatus(true);
       setCheckFeedback(null);
@@ -92,18 +104,18 @@ export const PaymentScreen: React.FC<PaymentScreenProps> = ({
         setIsCheckingStatus(false);
       }
     }
-  }, [currentOrder.id, isApproved, onPaymentApproved]);
+  }, [currentOrder.id, isApproved, isPayOnDelivery, onPaymentApproved]);
 
   // Polling automático a cada 4 segundos enquanto o pagamento estiver pendente
   useEffect(() => {
-    if (isApproved) return;
+    if (isApproved || isPayOnDelivery) return;
 
     const interval = setInterval(() => {
       verifyPaymentStatus(false);
     }, 4000);
 
     return () => clearInterval(interval);
-  }, [isApproved, verifyPaymentStatus]);
+  }, [isApproved, isPayOnDelivery, verifyPaymentStatus]);
 
   const handleCopyPix = () => {
     if (payment?.qr_code) {
@@ -372,31 +384,114 @@ export const PaymentScreen: React.FC<PaymentScreenProps> = ({
                     </div>
                   )}
 
-                  {/* Status em Tempo Real & Verificação Manual */}
-                  <div className="pt-4 border-t border-[#3A2E1F]/15 space-y-3">
-                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 rounded-xl bg-[#FAF7F0] border border-[#3A2E1F]/10">
-                      <div className="flex items-center gap-2 text-xs text-[#554432]">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                        <span>Sincronização em tempo real ativa com o Mercado Pago</span>
+                  {/* Pagar na Entrega (Débito, Crédito ou Dinheiro) */}
+                  {isPayOnDelivery && (
+                    <div className="space-y-5">
+                      <div className="p-6 rounded-2xl bg-[#FAF7F0] border border-[#B7A05E]/30 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-bold text-[#3A2E1F] flex items-center gap-2">
+                            <Truck className="w-5 h-5 text-[#B8623F]" />
+                            Pagamento no Ato da Entrega
+                          </span>
+                          <span className="text-[11px] text-emerald-800 bg-emerald-100/80 px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                            Pedido Registrado
+                          </span>
+                        </div>
+
+                        {/* Detalhes da forma de pagamento na entrega */}
+                        <div className="bg-white p-4 rounded-xl border border-[#3A2E1F]/10 space-y-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-[#B8623F]/10 text-[#B8623F] flex items-center justify-center shrink-0">
+                              {currentOrder.payment?.delivery_payment_details?.subtype === 'CASH' ? (
+                                <Banknote className="w-5 h-5" />
+                              ) : (
+                                <CreditCard className="w-5 h-5" />
+                              )}
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-bold text-[#3A2E1F]">
+                                {currentOrder.payment?.delivery_payment_details?.subtype === 'DEBIT_CARD'
+                                  ? 'Cartão de Débito (Máquina na Entrega)'
+                                  : currentOrder.payment?.delivery_payment_details?.subtype === 'CREDIT_CARD'
+                                  ? 'Cartão de Crédito (Máquina na Entrega)'
+                                  : 'Dinheiro em Espécie'}
+                              </h4>
+                              <p className="text-xs text-[#7E6C58]">
+                                {currentOrder.payment?.delivery_payment_details?.subtype === 'CASH'
+                                  ? currentOrder.payment?.delivery_payment_details?.needs_change &&
+                                    currentOrder.payment?.delivery_payment_details?.change_for
+                                    ? `Troco solicitado para R$ ${Number(
+                                        currentOrder.payment.delivery_payment_details.change_for
+                                      )
+                                        .toFixed(2)
+                                        .replace('.', ',')} (Troco a devolver: R$ ${(
+                                        Number(currentOrder.payment.delivery_payment_details.change_for) -
+                                        currentOrder.total
+                                      )
+                                        .toFixed(2)
+                                        .replace('.', ',')})`
+                                    : 'Pagamento com valor exato (sem necessidade de troco).'
+                                  : 'O entregador levará a máquina de cartão com o seu pedido.'}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="pt-2 border-t border-[#3A2E1F]/10 flex items-center justify-between text-xs">
+                            <span className="text-[#7E6C58]">Total a pagar ao receber:</span>
+                            <span className="font-serif font-bold text-base text-[#B8623F]">
+                              R$ {currentOrder.total.toFixed(2).replace('.', ',')}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Botão de Enviar no WhatsApp */}
+                        <div className="pt-2">
+                          <a
+                            id="btn-enviar-pedido-whatsapp"
+                            href={getWhatsAppOrderUrl(
+                              currentOrder,
+                              storeSettings?.whatsapp || BAKERY_WHATSAPP_NUMBER
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                          >
+                            <MessageCircle className="w-5 h-5" />
+                            <span>Enviar Pedido pelo WhatsApp</span>
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Status em Tempo Real & Verificação Manual (Apenas Mercado Pago Online) */}
+                  {!isPayOnDelivery && (
+                    <div className="pt-4 border-t border-[#3A2E1F]/15 space-y-3">
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 rounded-xl bg-[#FAF7F0] border border-[#3A2E1F]/10">
+                        <div className="flex items-center gap-2 text-xs text-[#554432]">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                          <span>Sincronização em tempo real ativa com o Mercado Pago</span>
+                        </div>
+
+                        <button
+                          id="btn-verificar-pagamento-manual"
+                          onClick={() => verifyPaymentStatus(true)}
+                          disabled={isCheckingStatus}
+                          className="w-full sm:w-auto px-4 py-2 bg-white border border-[#3A2E1F]/20 hover:bg-[#F3ECDD] text-[#3A2E1F] rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${isCheckingStatus ? 'animate-spin' : ''}`} />
+                          <span>{isCheckingStatus ? 'Consultando banco...' : 'Verificar Pagamento Agora'}</span>
+                        </button>
                       </div>
 
-                      <button
-                        id="btn-verificar-pagamento-manual"
-                        onClick={() => verifyPaymentStatus(true)}
-                        disabled={isCheckingStatus}
-                        className="w-full sm:w-auto px-4 py-2 bg-white border border-[#3A2E1F]/20 hover:bg-[#F3ECDD] text-[#3A2E1F] rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
-                      >
-                        <RefreshCw className={`w-3.5 h-3.5 ${isCheckingStatus ? 'animate-spin' : ''}`} />
-                        <span>{isCheckingStatus ? 'Consultando banco...' : 'Verificar Pagamento Agora'}</span>
-                      </button>
+                      {checkFeedback && (
+                        <p className="text-xs text-amber-800 text-center animate-fadeIn">
+                          {checkFeedback}
+                        </p>
+                      )}
                     </div>
-
-                    {checkFeedback && (
-                      <p className="text-xs text-amber-800 text-center animate-fadeIn">
-                        {checkFeedback}
-                      </p>
-                    )}
-                  </div>
+                  )}
                 </>
               )}
             </>

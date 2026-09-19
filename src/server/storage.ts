@@ -1,16 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import {
-  INITIAL_CATEGORIES,
-  INITIAL_COUPONS,
-  INITIAL_DELIVERY_CEPS,
-  INITIAL_DELIVERY_ZONES,
-  INITIAL_PRODUCTION_BATCHES,
-  INITIAL_PRODUCTS,
-  INITIAL_STORE_SETTINGS,
-  SAMPLE_ORDERS,
-} from './seedData';
-import {
   Category,
   Coupon,
   CustomerAddress,
@@ -25,6 +15,25 @@ import {
   Product,
   StoreSettings,
 } from '../types';
+
+const DEFAULT_STORE_SETTINGS: StoreSettings = {
+  id: 'a2e33509-1264-431a-a2e3-00003509831a',
+  name: 'Affeto Pães',
+  slug: 'affeto-paes-artesanais',
+  description: 'Padaria artesanal de fermentação lenta com levain de 36 horas, ingredientes nobres e respeito ao tempo do trigo.',
+  address: 'Rua Capitão José Carlos - 133',
+  city: 'Espera Feliz',
+  state: 'MG',
+  phone: '(32) 98468-0513',
+  whatsapp: '5532984680513',
+  pix_key: 'toledodias87@gmail.com',
+  is_open: true,
+  min_order_value: 15,
+  free_shipping_threshold: 120,
+  lead_time_minutes: 45,
+  opening_hours: [],
+  delivery_schedule_text: 'Entregas nas terças e sextas',
+};
 
 interface AffetoStoreData {
   storeSettings: StoreSettings;
@@ -72,14 +81,14 @@ class ServerStorage {
         const raw = fs.readFileSync(DATA_FILE, 'utf-8');
         const parsed = JSON.parse(raw);
         return {
-          storeSettings: { ...INITIAL_STORE_SETTINGS, ...parsed.storeSettings },
-          products: Array.isArray(parsed.products) && parsed.products.length > 0 ? parsed.products : INITIAL_PRODUCTS,
-          categories: Array.isArray(parsed.categories) && parsed.categories.length > 0 ? parsed.categories : INITIAL_CATEGORIES,
-          coupons: Array.isArray(parsed.coupons) ? parsed.coupons : INITIAL_COUPONS,
-          deliveryZones: Array.isArray(parsed.deliveryZones) ? parsed.deliveryZones : INITIAL_DELIVERY_ZONES,
-          deliveryCeps: Array.isArray(parsed.deliveryCeps) ? parsed.deliveryCeps : INITIAL_DELIVERY_CEPS,
-          orders: Array.isArray(parsed.orders) ? parsed.orders : SAMPLE_ORDERS,
-          productionBatches: Array.isArray(parsed.productionBatches) ? parsed.productionBatches : INITIAL_PRODUCTION_BATCHES,
+          storeSettings: { ...DEFAULT_STORE_SETTINGS, ...parsed.storeSettings },
+          products: Array.isArray(parsed.products) ? parsed.products : [],
+          categories: Array.isArray(parsed.categories) ? parsed.categories : [],
+          coupons: Array.isArray(parsed.coupons) ? parsed.coupons : [],
+          deliveryZones: Array.isArray(parsed.deliveryZones) ? parsed.deliveryZones : [],
+          deliveryCeps: Array.isArray(parsed.deliveryCeps) ? parsed.deliveryCeps : [],
+          orders: Array.isArray(parsed.orders) ? parsed.orders : [],
+          productionBatches: Array.isArray(parsed.productionBatches) ? parsed.productionBatches : [],
         };
       } catch (err) {
         console.error('[ServerStorage] Error reading data file, using defaults:', err);
@@ -87,14 +96,14 @@ class ServerStorage {
     }
 
     const initialData: AffetoStoreData = {
-      storeSettings: INITIAL_STORE_SETTINGS,
-      products: INITIAL_PRODUCTS,
-      categories: INITIAL_CATEGORIES,
-      coupons: INITIAL_COUPONS,
-      deliveryZones: INITIAL_DELIVERY_ZONES,
-      deliveryCeps: INITIAL_DELIVERY_CEPS,
-      orders: SAMPLE_ORDERS,
-      productionBatches: INITIAL_PRODUCTION_BATCHES,
+      storeSettings: DEFAULT_STORE_SETTINGS,
+      products: [],
+      categories: [],
+      coupons: [],
+      deliveryZones: [],
+      deliveryCeps: [],
+      orders: [],
+      productionBatches: [],
     };
 
     this.saveDataToFile(initialData);

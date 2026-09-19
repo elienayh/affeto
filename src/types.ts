@@ -19,7 +19,20 @@ export type PaymentStatus =
 
 export type DeliveryType = 'DELIVERY' | 'PICKUP';
 
-export type PaymentMethod = 'PIX' | 'CREDIT_CARD' | 'DEBIT_CARD' | 'CASH_ON_DELIVERY';
+export type PaymentMethod =
+  | 'PIX'
+  | 'CREDIT_CARD'
+  | 'DEBIT_CARD'
+  | 'CASH_ON_DELIVERY'
+  | 'PAY_ON_DELIVERY';
+
+export type DeliveryPaymentSubtype = 'DEBIT_CARD' | 'CREDIT_CARD' | 'CASH';
+
+export interface DeliveryPaymentDetails {
+  subtype: DeliveryPaymentSubtype;
+  needs_change?: boolean;
+  change_for?: number | null;
+}
 
 export interface Category {
   id: string;
@@ -231,7 +244,7 @@ export interface OrderStatusHistoryItem {
 export interface PaymentRecord {
   id: string;
   order_id: string;
-  provider: 'MERCADO_PAGO' | 'MANUAL';
+  provider: 'MERCADO_PAGO' | 'MANUAL' | 'CASH_ON_DELIVERY';
   external_id?: string;
   method: PaymentMethod;
   amount: number;
@@ -239,6 +252,7 @@ export interface PaymentRecord {
   qr_code?: string;
   qr_code_base64?: string;
   ticket_url?: string;
+  delivery_payment_details?: DeliveryPaymentDetails;
   created_at: string;
   updated_at: string;
 }
@@ -265,6 +279,8 @@ export interface Order {
   coupon_code?: string;
   notes?: string;
   payment_method?: PaymentMethod;
+  delivery_payment_details?: DeliveryPaymentDetails;
+  change_for?: number | null;
   payment?: PaymentRecord;
   deliveries?: OrderDelivery[];
   status_history: OrderStatusHistoryItem[];

@@ -1,5 +1,11 @@
 import express from 'express';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import {
+  createRealMercadoPagoPayment,
+  getRealMercadoPagoPayment,
+  isMercadoPagoConfigured,
+} from '../src/server/mercadopago';
+import { uploadAssetToSupabaseStorage } from '../src/server/supabaseServer';
 
 const app = express();
 
@@ -1211,13 +1217,196 @@ app.post('/api/pricing/calculate', async (req, res) => {
   }
 });
 
-// 12. Mercado Pago & Payments
+// 12. Dedicated asset upload endpoint to Supabase Storage (affeto-assets bucket)
+app.post('/api/upload', async (req, res) => {
+  try {
+    const { image, folder = 'general', prefix = 'asset' } = req.body;
+    if (!image) {
+      return res.status(400).json({ error: 'Nenhuma imagem fornecida' });
+    }
+    const url = await uploadAssetToSupabaseStorage(image, folder, prefix);
+    if (url) {
+      return res.json({ url });
+    }
+    return res.status(500).json({ error: 'Falha no upload para o Supabase Storage' });
+  } catch (err: any) {
+    console.error('[API Upload Error]:', err);
+    return res.status(500).json({ error: err?.message || 'Erro no upload' });
+  }
+});
+
+// 13. Mercado Pago & Payments
 app.get('/api/payments/config', (_req, res) => {
   return res.json({
     mercadopago_configured: Boolean(process.env.MERCADOPAGO_ACCESS_TOKEN),
     environment: 'production',
-    supported_methods: ['PIX', 'CREDIT_CARD'],
+    supported_methods: ['PIX', 'CREDIT_CARD', 'PAY_ON_DELIVERY', 'CASH_ON_DELIVERY'],
   });
+});
+
+app.post('/api/payments/create', async (req, res) => {
+  try {
+    const {
+      order_id,
+      method,
+      payer_cpf,
+      payer_email,
+      payer_name,
+      delivery_payment_details,
+    } = req.body;
+
+    if (!order_id) {
+      return res.status(400).json({ error: 'order_id é obrigatório' });
+    }
+
+    const supabase = getSupabase();
+    let order: any = null;
+
+    if (supabase) {
+      const orderUuid = toUuid(order_id);
+      const { data } = await supabase
+        .from('orders')
+        .select('*')
+        .or(`id.eq.${orderUuid},id.eq.${order_id}`)
+        .maybeSingle();
+
+      if (data) {
+        order = {
+          id: data.id,
+          code: data.order_number || `#AFF-${data.id.slice(0, 4)}`,
+          customer_name: payer_name || 'Cliente',
+          customer_email: payer_email || 'cliente@affetopaes.com.br',
+          total: Number(data.total) || 0,
+          payment_status: data.payment_status || 'PENDING',
+          delivery_type: data.fulfillment_type || 'DELIVERY',
+        };
+      }
+    }
+
+    if (!order) {
+      order = {
+        id: order_id,
+        code: `#AFF-${order_id.replace(/\D/g, '').slice(-4) || '0001'}`,
+        customer_name: payer_name || 'Cliente',
+        customer_email: payer_email || 'cliente@affetopaes.com.br',
+        total: 0,
+        payment_status: 'PENDING',
+      };
+    }
+
+    const nowIso = new Date().toISOString();
+
+    // Caso 1: Pagamento na Entrega (Débito, Crédito ou Dinheiro)
+    if (method === 'PAY_ON_DELIVERY' || method === 'CASH_ON_DELIVERY') {
+      const deliveryPaymentRecord = {
+        id: `pay-${order.id}-${Date.now()}`,
+        order_id: order.id,
+        provider: 'CASH_ON_DELIVERY',
+        external_id: `delivery_${order.id}`,
+        method: 'PAY_ON_DELIVERY',
+        amount: order.total,
+        status: 'PENDING',
+        delivery_payment_details: delivery_payment_details,
+        created_at: nowIso,
+        updated_at: nowIso,
+      };
+
+      if (supabase) {
+        const orderUuid = toUuid(order.id);
+        const subtypeLabel =
+          delivery_payment_details?.subtype === 'DEBIT_CARD'
+            ? 'Cartão de Débito'
+            : delivery_payment_details?.subtype === 'CREDIT_CARD'
+            ? 'Cartão de Crédito'
+            : `Dinheiro${
+                delivery_payment_details?.needs_change && delivery_payment_details?.change_for
+                  ? ` (Troco p/ R$ ${Number(delivery_payment_details.change_for).toFixed(2)})`
+                  : ' (Sem troco)'
+              }`;
+
+        await supabase
+          .from('orders')
+          .update({
+            payment_method: 'PAY_ON_DELIVERY',
+            payment_status: 'PENDING',
+            notes: `[Pagar na Entrega: ${subtypeLabel}]`,
+            updated_at: nowIso,
+          })
+          .eq('id', orderUuid);
+      }
+
+      return res.json({
+        success: true,
+        payment: deliveryPaymentRecord,
+        order,
+      });
+    }
+
+    // Caso 2: PIX ou Cartão via Mercado Pago
+    const storeSettings = await fetchStoreSettingsFromSupabase();
+    const appUrl = `${req.protocol}://${req.get('host')}`;
+
+    const paymentRecord = await createRealMercadoPagoPayment(order, method || 'PIX', {
+      payer_cpf,
+      payer_email,
+      payer_name,
+      app_url: appUrl,
+      store_pix_key: storeSettings?.pix_key || 'toledodias87@gmail.com',
+    });
+
+    if (supabase) {
+      const orderUuid = toUuid(order.id);
+      await supabase
+        .from('orders')
+        .update({
+          payment_method: method || 'PIX',
+          payment_status: paymentRecord.status,
+          updated_at: nowIso,
+        })
+        .eq('id', orderUuid);
+    }
+
+    return res.json({
+      success: true,
+      payment: paymentRecord,
+      order,
+      is_mercadopago_real: isMercadoPagoConfigured(),
+    });
+  } catch (err: any) {
+    console.error('[API Payments Create Error]:', err);
+    return res.status(500).json({ error: err?.message || 'Erro ao processar pagamento' });
+  }
+});
+
+app.get('/api/payments/:orderId/status', async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const supabase = getSupabase();
+    let order: any = null;
+
+    if (supabase) {
+      const orderUuid = toUuid(orderId);
+      const { data } = await supabase
+        .from('orders')
+        .select('*')
+        .or(`id.eq.${orderUuid},id.eq.${orderId}`)
+        .maybeSingle();
+      if (data) {
+        order = data;
+      }
+    }
+
+    return res.json({
+      order_id: orderId,
+      payment_status: order?.payment_status || 'PENDING',
+      order_status: order?.status || 'PENDING_PAYMENT',
+      is_approved: order?.payment_status === 'APPROVED',
+      order,
+    });
+  } catch (err: any) {
+    console.error('[API Payment Status Error]:', err);
+    return res.status(500).json({ error: 'Erro ao verificar status' });
+  }
 });
 
 app.post('/api/webhooks/mercadopago', async (req, res) => {

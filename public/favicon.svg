@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Clip to rounded squircle corners -->
+    <clipPath id="squircle">
+      <rect x="0" y="0" width="512" height="512" rx="100" ry="100" />
+    </clipPath>
+  </defs>
+
+  <!-- Background in signature Affeto olive/sage gold tone -->
+  <rect width="512" height="512" rx="100" ry="100" fill="#B4AA76" />
+
+  <g id="affeto-emblem">
+    <!-- Letter 'A' in classic Didone / Bodoni serif display -->
+    <!-- Left Stem with bottom serif and diagonal tapering -->
+    <!-- Serif base left: x=115 to 158 -->
+    <path d="
+      M 115,410 
+      L 158,410 
+      Q 148,407 146,396 
+      L 174,272 
+      L 256,108 
+      L 260,100 
+      L 248,100 
+      L 136,396 
+      Q 132,407 115,410 
+      Z" 
+      fill="#FFFFFF" />
+
+    <!-- Right Heavy Stem with top apex and bottom serif -->
+    <!-- Serif base right: x=330 to 398 -->
+    <path d="
+      M 248,98 
+      L 268,98 
+      L 358,396 
+      Q 360,407 398,410 
+      L 330,410 
+      Q 346,407 344,396 
+      L 282,185 
+      L 254,98 
+      Z" 
+      fill="#FFFFFF" />
+
+    <!-- Serif Apex Top & Connective Tissue -->
+    <path d="
+      M 246,98 
+      L 268,98 
+      L 261,120 
+      L 242,120 
+      Z" 
+      fill="#FFFFFF" />
+
+    <!-- Crossbar of the A projecting toward the wheat stalk -->
+    <path d="
+      M 172,305 
+      L 335,372 
+      L 332,377 
+      L 169,310 
+      Z" 
+      fill="#FFFFFF" />
+
+    <!-- Artisan Wheat Ear / Trigo Stalk Crossing the A -->
+    <g id="wheat-stalk" fill="#FFFFFF">
+      <!-- Main Stem / Arching Spine -->
+      <path d="
+        M 88,212 
+        Q 200,285 334,374 
+        L 331,379 
+        Q 197,290 85,216 
+        Z" />
+
+      <!-- Top Terminal Awn / Grains -->
+      <path d="M 82,162 C 86,182 98,198 106,206 C 98,196 90,182 82,162 Z" />
+      <path d="M 98,175 C 104,192 118,206 126,212 C 117,203 108,191 98,175 Z" />
+
+      <!-- Grain Pair 1 -->
+      <path d="M 94,228 C 108,218 126,208 138,216 C 130,228 114,236 94,228 Z" />
+      <path d="M 124,192 C 138,188 152,198 150,212 C 140,214 128,206 124,192 Z" />
+
+      <!-- Grain Pair 2 -->
+      <path d="M 112,246 C 128,232 148,224 162,234 C 152,248 134,256 112,246 Z" />
+      <path d="M 144,208 C 160,202 176,214 174,230 C 162,232 148,224 144,208 Z" />
+
+      <!-- Grain Pair 3 -->
+      <path d="M 132,264 C 150,248 172,240 188,252 C 176,268 156,276 132,264 Z" />
+      <path d="M 166,224 C 184,218 202,230 198,248 C 184,250 170,240 166,224 Z" />
+
+      <!-- Grain Pair 4 -->
+      <path d="M 154,284 C 174,266 198,258 214,272 C 200,288 178,296 154,284 Z" />
+      <path d="M 190,240 C 210,234 228,248 224,266 C 208,268 194,258 190,240 Z" />
+
+      <!-- Grain Pair 5 -->
+      <path d="M 178,304 C 200,284 226,276 242,292 C 226,308 202,318 178,304 Z" />
+      <path d="M 216,258 C 238,250 258,266 252,286 C 234,288 218,276 216,258 Z" />
+
+      <!-- Grain Pair 6 -->
+      <path d="M 204,324 C 228,302 256,296 272,312 C 254,328 228,338 204,324 Z" />
+      <path d="M 244,276 C 268,268 288,284 282,306 C 262,308 246,296 244,276 Z" />
+
+      <!-- Lower Grain Accent -->
+      <path d="M 232,342 C 254,324 280,318 294,332 C 278,346 254,354 232,342 Z" />
+      <path d="M 270,298 C 290,292 308,306 302,324 C 286,326 272,316 270,298 Z" />
+    </g>
+  </g>
+</svg>

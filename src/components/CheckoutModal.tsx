@@ -18,6 +18,8 @@ import {
   Layers,
   Flame,
   Lock,
+  Banknote,
+  Truck,
 } from 'lucide-react';
 import { getNextAvailableBatch } from '../lib/batchScheduler';
 import { matchDeliveryCep } from '../lib/pricingEngine';
@@ -35,6 +37,8 @@ import {
   CartItem,
   CustomerAddress,
   DeliveryCepRule,
+  DeliveryPaymentDetails,
+  DeliveryPaymentSubtype,
   DeliveryType,
   Order,
   PaymentMethod,
@@ -167,10 +171,26 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   }, [initialCep, storeSettings]);
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('PIX');
+  const [deliveryPaymentSubtype, setDeliveryPaymentSubtype] = useState<DeliveryPaymentSubtype>('DEBIT_CARD');
+  const [needsChange, setNeedsChange] = useState<boolean>(false);
+  const [changeForInput, setChangeForInput] = useState<string>('');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLookingUp, setIsLookingUp] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Cálculo e validação do troco
+  const parsedChangeFor = useMemo(() => {
+    if (!changeForInput.trim()) return 0;
+    const clean = changeForInput.replace(/[^\d,.]/g, '').replace(',', '.');
+    const val = parseFloat(clean);
+    return isNaN(val) ? 0 : val;
+  }, [changeForInput]);
+
+  const changeDue = useMemo(() => {
+    if (!needsChange || parsedChangeFor <= pricing.total) return 0;
+    return parsedChangeFor - pricing.total;
+  }, [needsChange, parsedChangeFor, pricing.total]);
 
   // Sync scheduled date when recommended date changes
   useEffect(() => {
@@ -319,6 +339,16 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       }
     }
 
+    // Validação de troco se a forma de pagamento for Dinheiro na Entrega
+    if (paymentMethod === 'PAY_ON_DELIVERY' && deliveryPaymentSubtype === 'CASH' && needsChange) {
+      if (!parsedChangeFor || parsedChangeFor < pricing.total) {
+        setErrorMessage(
+          `Por favor, informe um valor de troco válido e superior ao total do pedido (R$ ${pricing.total.toFixed(2).replace('.', ',')}).`
+        );
+        return;
+      }
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -341,6 +371,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         address: finalAddress,
       });
 
+      const deliveryPaymentDetails: DeliveryPaymentDetails | undefined =
+        paymentMethod === 'PAY_ON_DELIVERY'
+          ? {
+              subtype: deliveryPaymentSubtype,
+              needs_change: deliveryPaymentSubtype === 'CASH' ? needsChange : false,
+              change_for: deliveryPaymentSubtype === 'CASH' && needsChange ? parsedChangeFor : null,
+            }
+          : undefined;
+
       const orderPayload = {
         customer_name: customerName.trim(),
         customer_email: customerEmail.trim() || `${cleanPhoneDigits(customerPhone)}@affeto.com.br`,
@@ -353,6 +392,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         coupon_code: pricing.coupon_code,
         notes: notes.trim(),
         payment_method: paymentMethod,
+        delivery_payment_details: deliveryPaymentDetails,
         items: items.map((it) => ({
           product_id: it.product.id,
           quantity: it.quantity,
@@ -780,40 +820,194 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           <div className="space-y-3 pt-3 border-t border-[#3A2E1F]/10">
             <h3 className="font-serif font-bold text-sm text-[#3A2E1F] flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-[#B8623F]" />
-              <span>4. Forma de Pagamento (Mercado Pago)</span>
+              <span>4. Forma de Pagamento</span>
             </h3>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               <label
+                id="opt-pay-pix"
                 onClick={() => setPaymentMethod('PIX')}
-                className={`p-3.5 rounded-2xl border flex flex-col items-center text-center cursor-pointer transition-all ${
+                className={`p-3 rounded-2xl border flex flex-col items-center text-center cursor-pointer transition-all ${
                   paymentMethod === 'PIX'
-                    ? 'border-[#B8623F] bg-[#B8623F]/5 text-[#3A2E1F] shadow-2xs font-semibold'
+                    ? 'border-[#B8623F] bg-[#B8623F]/5 text-[#3A2E1F] shadow-2xs font-semibold ring-1 ring-[#B8623F]'
                     : 'border-[#3A2E1F]/15 hover:bg-[#FAF7F0] text-[#554432]'
                 }`}
               >
                 <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-1.5">
                   <QrCode className="w-4 h-4" />
                 </div>
-                <span className="text-xs">PIX Imediato</span>
+                <span className="text-xs font-bold">PIX Imediato</span>
                 <span className="text-[10px] text-emerald-700 mt-0.5">Aprovação em segundos</span>
               </label>
 
               <label
+                id="opt-pay-credit"
                 onClick={() => setPaymentMethod('CREDIT_CARD')}
-                className={`p-3.5 rounded-2xl border flex flex-col items-center text-center cursor-pointer transition-all ${
+                className={`p-3 rounded-2xl border flex flex-col items-center text-center cursor-pointer transition-all ${
                   paymentMethod === 'CREDIT_CARD'
-                    ? 'border-[#B8623F] bg-[#B8623F]/5 text-[#3A2E1F] shadow-2xs font-semibold'
+                    ? 'border-[#B8623F] bg-[#B8623F]/5 text-[#3A2E1F] shadow-2xs font-semibold ring-1 ring-[#B8623F]'
                     : 'border-[#3A2E1F]/15 hover:bg-[#FAF7F0] text-[#554432]'
                 }`}
               >
                 <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center mb-1.5">
                   <CreditCard className="w-4 h-4" />
                 </div>
-                <span className="text-xs">Cartão de Crédito</span>
-                <span className="text-[10px] text-[#7E6C58] mt-0.5">Checkout seguro</span>
+                <span className="text-xs font-bold">Cartão (Online)</span>
+                <span className="text-[10px] text-[#7E6C58] mt-0.5">Mercado Pago</span>
+              </label>
+
+              <label
+                id="opt-pay-on-delivery"
+                onClick={() => setPaymentMethod('PAY_ON_DELIVERY')}
+                className={`p-3 rounded-2xl border flex flex-col items-center text-center cursor-pointer transition-all ${
+                  paymentMethod === 'PAY_ON_DELIVERY'
+                    ? 'border-[#B8623F] bg-[#B8623F]/5 text-[#3A2E1F] shadow-2xs font-semibold ring-1 ring-[#B8623F]'
+                    : 'border-[#3A2E1F]/15 hover:bg-[#FAF7F0] text-[#554432]'
+                }`}
+              >
+                <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center mb-1.5">
+                  <Truck className="w-4 h-4" />
+                </div>
+                <span className="text-xs font-bold">Pagar na Entrega</span>
+                <span className="text-[10px] text-amber-800 mt-0.5">Débito, Crédito ou Dinheiro</span>
               </label>
             </div>
+
+            {/* Sub-opções detalhadas para Pagar na Entrega */}
+            {paymentMethod === 'PAY_ON_DELIVERY' && (
+              <div className="p-4 rounded-2xl bg-[#FBF9F5] border border-[#B7A05E]/40 space-y-3 animate-fadeIn">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#3A2E1F] flex items-center gap-1.5">
+                    <Truck className="w-4 h-4 text-[#B8623F]" />
+                    Como você prefere pagar no ato da entrega?
+                  </span>
+                  <span className="text-[10px] text-[#B8623F] font-bold bg-[#B8623F]/10 px-2 py-0.5 rounded-full">
+                    {deliveryType === 'PICKUP' ? 'No Balcão' : 'Na Entrega'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    id="pay-delivery-debit"
+                    onClick={() => setDeliveryPaymentSubtype('DEBIT_CARD')}
+                    className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center ${
+                      deliveryPaymentSubtype === 'DEBIT_CARD'
+                        ? 'border-[#B8623F] bg-white text-[#B8623F] font-bold shadow-xs ring-1 ring-[#B8623F]'
+                        : 'border-[#3A2E1F]/15 bg-[#FAF7F0] text-[#554432] hover:bg-white'
+                    }`}
+                  >
+                    <CreditCard className="w-4 h-4 mb-1" />
+                    <span className="text-xs">Cartão Débito</span>
+                    <span className="text-[10px] text-[#7E6C58]">Levar máquina</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    id="pay-delivery-credit"
+                    onClick={() => setDeliveryPaymentSubtype('CREDIT_CARD')}
+                    className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center ${
+                      deliveryPaymentSubtype === 'CREDIT_CARD'
+                        ? 'border-[#B8623F] bg-white text-[#B8623F] font-bold shadow-xs ring-1 ring-[#B8623F]'
+                        : 'border-[#3A2E1F]/15 bg-[#FAF7F0] text-[#554432] hover:bg-white'
+                    }`}
+                  >
+                    <CreditCard className="w-4 h-4 mb-1" />
+                    <span className="text-xs">Cartão Crédito</span>
+                    <span className="text-[10px] text-[#7E6C58]">Levar máquina</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    id="pay-delivery-cash"
+                    onClick={() => setDeliveryPaymentSubtype('CASH')}
+                    className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center ${
+                      deliveryPaymentSubtype === 'CASH'
+                        ? 'border-[#B8623F] bg-white text-[#B8623F] font-bold shadow-xs ring-1 ring-[#B8623F]'
+                        : 'border-[#3A2E1F]/15 bg-[#FAF7F0] text-[#554432] hover:bg-white'
+                    }`}
+                  >
+                    <Banknote className="w-4 h-4 mb-1" />
+                    <span className="text-xs">Dinheiro</span>
+                    <span className="text-[10px] text-[#7E6C58]">Em espécie</span>
+                  </button>
+                </div>
+
+                {/* Seção de Troco para Dinheiro */}
+                {deliveryPaymentSubtype === 'CASH' && (
+                  <div className="pt-2 border-t border-[#3A2E1F]/10 space-y-2.5 animate-fadeIn">
+                    <label className="block text-xs font-bold text-[#3A2E1F]">
+                      Precisa de troco?
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        id="btn-troco-nao"
+                        onClick={() => {
+                          setNeedsChange(false);
+                          setChangeForInput('');
+                        }}
+                        className={`py-2 px-3 rounded-xl border text-xs text-center transition-all cursor-pointer ${
+                          !needsChange
+                            ? 'border-emerald-600 bg-emerald-50 text-emerald-800 font-bold'
+                            : 'border-[#3A2E1F]/15 bg-white text-[#554432] hover:bg-[#FAF7F0]'
+                        }`}
+                      >
+                        Não preciso de troco
+                      </button>
+                      <button
+                        type="button"
+                        id="btn-troco-sim"
+                        onClick={() => setNeedsChange(true)}
+                        className={`py-2 px-3 rounded-xl border text-xs text-center transition-all cursor-pointer ${
+                          needsChange
+                            ? 'border-[#B8623F] bg-[#B8623F]/10 text-[#B8623F] font-bold'
+                            : 'border-[#3A2E1F]/15 bg-white text-[#554432] hover:bg-[#FAF7F0]'
+                        }`}
+                      >
+                        Sim, preciso de troco
+                      </button>
+                    </div>
+
+                    {needsChange && (
+                      <div className="p-3 bg-white rounded-xl border border-[#3A2E1F]/15 space-y-2 animate-fadeIn">
+                        <label className="block text-xs font-semibold text-[#554432]">
+                          Troco para quanto? (R$)
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-[#7E6C58]">
+                            R$
+                          </span>
+                          <input
+                            id="input-troco-para"
+                            type="text"
+                            placeholder="Ex: 50,00 ou 100,00"
+                            value={changeForInput}
+                            onChange={(e) => setChangeForInput(e.target.value)}
+                            className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-[#3A2E1F]/20 bg-white text-[#3A2E1F] focus:ring-2 focus:ring-[#B8623F] focus:outline-none font-bold"
+                          />
+                        </div>
+
+                        {parsedChangeFor > 0 && parsedChangeFor >= pricing.total && (
+                          <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-800 flex items-center justify-between">
+                            <span>Troco a devolver:</span>
+                            <span className="font-bold text-xs">
+                              R$ {changeDue.toFixed(2).replace('.', ',')}
+                            </span>
+                          </div>
+                        )}
+
+                        {parsedChangeFor > 0 && parsedChangeFor < pricing.total && (
+                          <p className="text-[11px] text-red-600 font-medium">
+                            O valor informado deve ser maior que o total do pedido (R$ {pricing.total.toFixed(2).replace('.', ',')}).
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Notes for order */}

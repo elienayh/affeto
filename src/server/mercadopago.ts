@@ -125,10 +125,15 @@ export async function createRealMercadoPagoPayment(
         const paymentClient = new Payment(client);
         console.info(`[MercadoPago] Criando cobrança PIX real para Pedido ${order.code} (R$ ${order.total.toFixed(2)})`);
 
+        const safeEmail =
+          customerEmail && customerEmail.includes('@') && !customerEmail.endsWith('@example.com')
+            ? customerEmail
+            : 'cliente@affetopaes.com.br';
+
         const payerData: any = {
-          email: customerEmail,
-          first_name: firstName,
-          last_name: lastName,
+          email: safeEmail,
+          first_name: firstName || 'Cliente',
+          last_name: lastName || 'Affeto',
         };
 
         if (cleanCpf && cleanCpf.length === 11) {
@@ -261,11 +266,11 @@ export async function createRealMercadoPagoPayment(
   }
 
   // 2. Fallback resiliente com a Chave PIX oficial da padaria (EMV BR Code)
-  const pixKey = options?.store_pix_key || 'contato@affetopaes.com.br';
+  const pixKey = options?.store_pix_key || 'toledodias87@gmail.com';
   const brCode = generatePixBrCode({
     pixKey,
     merchantName: 'AFFETO PAES',
-    merchantCity: 'SAO PAULO',
+    merchantCity: 'ESPERA FELIZ',
     amount: order.total,
     txId: order.code,
   });

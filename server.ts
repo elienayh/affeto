@@ -25,6 +25,7 @@ import {
   getRealMercadoPagoPayment,
   isMercadoPagoConfigured,
 } from './src/server/mercadopago';
+import { PaymentRecord } from './src/types';
 
 async function startServer() {
   const app = express();
@@ -485,13 +486,20 @@ async function startServer() {
     return res.json({
       mercadopago_configured: isMercadoPagoConfigured(),
       environment: 'production',
-      supported_methods: ['PIX', 'CREDIT_CARD'],
+      supported_methods: ['PIX', 'CREDIT_CARD', 'PAY_ON_DELIVERY', 'CASH_ON_DELIVERY'],
     });
   });
 
   app.post('/api/payments/create', async (req, res) => {
     try {
-      const { order_id, method, payer_cpf, payer_email, payer_name } = req.body;
+      const {
+        order_id,
+        method,
+        payer_cpf,
+        payer_email,
+        payer_name,
+        delivery_payment_details,
+      } = req.body;
       if (!order_id) {
         return res.status(400).json({ error: 'order_id é obrigatório' });
       }
@@ -499,6 +507,30 @@ async function startServer() {
       const order = serverStorage.getOrder(order_id);
       if (!order) {
         return res.status(404).json({ error: 'Pedido não encontrado para gerar pagamento' });
+      }
+
+      const nowIso = new Date().toISOString();
+
+      if (method === 'PAY_ON_DELIVERY' || method === 'CASH_ON_DELIVERY') {
+        const deliveryPayment: PaymentRecord = {
+          id: `pay-${order.id}-${Date.now()}`,
+          order_id: order.id,
+          provider: 'CASH_ON_DELIVERY',
+          external_id: `delivery_${order.id}`,
+          method: 'PAY_ON_DELIVERY',
+          amount: order.total,
+          status: 'PENDING',
+          delivery_payment_details,
+          created_at: nowIso,
+          updated_at: nowIso,
+        };
+
+        serverStorage.setOrderPayment(order.id, deliveryPayment);
+        return res.json({
+          success: true,
+          payment: deliveryPayment,
+          order: serverStorage.getOrder(order.id),
+        });
       }
 
       const storeSettings = serverStorage.getSettings();

@@ -36,9 +36,56 @@ export const paymentService = {
       payer_cpf?: string;
       payer_email?: string;
       payer_name?: string;
+      delivery_payment_details?: any;
     }
   ): Promise<PaymentRecord> => {
     const nowIso = new Date().toISOString();
+
+    const deliveryDetails =
+      options?.delivery_payment_details || order.payment?.delivery_payment_details;
+
+    if (method === 'PAY_ON_DELIVERY' || method === 'CASH_ON_DELIVERY') {
+      const paymentId = `pay-${order.id}-${Date.now()}`;
+      const deliveryPayment: PaymentRecord = {
+        id: paymentId,
+        order_id: order.id,
+        provider: 'CASH_ON_DELIVERY',
+        external_id: `delivery_${order.id}`,
+        method: 'PAY_ON_DELIVERY',
+        amount: order.total,
+        status: 'PENDING',
+        delivery_payment_details: deliveryDetails,
+        created_at: nowIso,
+        updated_at: nowIso,
+      };
+
+      try {
+        await fetch('/api/payments/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            order_id: order.id,
+            method: 'PAY_ON_DELIVERY',
+            payer_cpf: options?.payer_cpf,
+            payer_email: options?.payer_email || order.customer_email,
+            payer_name: options?.payer_name || order.customer_name,
+            delivery_payment_details: deliveryDetails,
+          }),
+        });
+      } catch (e) {
+        // ignore network error
+      }
+
+      const orders = await dataStore.getOrders();
+      const orderIdx = orders.findIndex((o) => o.id === order.id);
+      if (orderIdx >= 0) {
+        orders[orderIdx].payment = deliveryPayment;
+        orders[orderIdx].payment_method = 'PAY_ON_DELIVERY';
+        dataStore.saveOrders(orders);
+      }
+
+      return deliveryPayment;
+    }
 
     try {
       const response = await fetch('/api/payments/create', {
@@ -50,6 +97,7 @@ export const paymentService = {
           payer_cpf: options?.payer_cpf,
           payer_email: options?.payer_email || order.customer_email,
           payer_name: options?.payer_name || order.customer_name,
+          delivery_payment_details: deliveryDetails,
         }),
       });
 
@@ -81,7 +129,8 @@ export const paymentService = {
     // Fallback de contingência caso o servidor demore a responder
     const paymentId = `pay-${order.id}-${Date.now()}`;
     const cleanAmount = order.total.toFixed(2);
-    const fallbackPix = `00020126580014br.gov.bcb.pix0136contato@affetopaes.com.br520400005303986540${cleanAmount.length}${cleanAmount}5802BR5911AFFETO PAES6009SAO PAULO62070503${order.code.replace(/[^a-zA-Z0-9]/g, '')}6304ABCD`;
+    const pixKey = 'toledodias87@gmail.com';
+    const fallbackPix = `00020126580014br.gov.bcb.pix01${pixKey.length}${pixKey}520400005303986540${cleanAmount.length}${cleanAmount}5802BR5911AFFETO PAES6012ESPERA FELIZ62070503${order.code.replace(/[^a-zA-Z0-9]/g, '')}6304ABCD`;
 
     const payment: PaymentRecord = {
       id: paymentId,

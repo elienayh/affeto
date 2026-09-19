@@ -109,12 +109,33 @@ export const saveCustomerByPhone = (customer: CustomerData): void => {
 export const generateWhatsAppOrderSummary = (order: Order): string => {
   const code = order.code || order.id.slice(-6).toUpperCase();
   const method = order.payment_method || order.payment?.method || 'PIX';
-  const paymentText =
-    method === 'PIX'
-      ? 'PIX (Mercado Pago)'
-      : method === 'CREDIT_CARD'
-      ? 'Cartão de Crédito'
-      : 'A Combinar';
+  const deliveryPay = order.delivery_payment_details || order.payment?.delivery_payment_details;
+
+  let paymentText = 'A Combinar';
+  if (method === 'PIX') {
+    paymentText = 'PIX (Mercado Pago)';
+  } else if (method === 'CREDIT_CARD' && !deliveryPay) {
+    paymentText = 'Cartão de Crédito (Mercado Pago)';
+  } else if (method === 'PAY_ON_DELIVERY' || method === 'CASH_ON_DELIVERY' || deliveryPay) {
+    const subtype = deliveryPay?.subtype || (method === 'DEBIT_CARD' ? 'DEBIT_CARD' : 'CASH');
+    if (subtype === 'DEBIT_CARD') {
+      paymentText = 'Pagar na Entrega (Cartão de Débito - Levar Maquininha)';
+    } else if (subtype === 'CREDIT_CARD') {
+      paymentText = 'Pagar na Entrega (Cartão de Crédito - Levar Maquininha)';
+    } else {
+      const changeFor = deliveryPay?.change_for ?? order.change_for;
+      if (deliveryPay?.needs_change && changeFor && changeFor > order.total) {
+        const changeValue = changeFor - order.total;
+        paymentText = `Pagar na Entrega (Dinheiro - Troco p/ R$ ${changeFor.toFixed(2).replace('.', ',')} | Levar R$ ${changeValue.toFixed(2).replace('.', ',')} de troco)`;
+      } else if (deliveryPay?.needs_change && changeFor) {
+        paymentText = `Pagar na Entrega (Dinheiro - Troco p/ R$ ${changeFor.toFixed(2).replace('.', ',')})`;
+      } else {
+        paymentText = 'Pagar na Entrega (Dinheiro - Não precisa de troco)';
+      }
+    }
+  } else if (method === 'DEBIT_CARD') {
+    paymentText = 'Pagar na Entrega (Cartão de Débito - Levar Maquininha)';
+  }
 
   const locationName =
     (order as any).delivery_location_name ||

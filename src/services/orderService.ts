@@ -2,6 +2,7 @@ import { calculateOrderPricing } from '../lib/pricingEngine';
 import { dataStore } from '../lib/supabase';
 import {
   CustomerAddress,
+  DeliveryPaymentDetails,
   DeliveryType,
   Order,
   OrderDelivery,
@@ -35,6 +36,7 @@ export interface CreateOrderInput {
     delivery_window?: string; // Ex: '14:00 - 18:00'
   }>;
   payment_method: PaymentMethod;
+  delivery_payment_details?: DeliveryPaymentDetails;
 }
 
 export const orderService = {
@@ -241,6 +243,24 @@ export const orderService = {
       total: breakdown.total,
       coupon_code: breakdown.coupon_code,
       notes: input.notes,
+      payment_method: input.payment_method,
+      delivery_payment_details: input.delivery_payment_details,
+      change_for: input.delivery_payment_details?.change_for,
+      payment:
+        input.payment_method === 'PAY_ON_DELIVERY' || input.payment_method === 'CASH_ON_DELIVERY'
+          ? {
+              id: `pay-${orderId}-${Date.now()}`,
+              order_id: orderId,
+              provider: 'CASH_ON_DELIVERY',
+              external_id: `delivery_${orderCode}`,
+              method: input.payment_method,
+              amount: breakdown.total,
+              status: 'PENDING',
+              delivery_payment_details: input.delivery_payment_details,
+              created_at: nowIso,
+              updated_at: nowIso,
+            }
+          : undefined,
       status_history: [
         {
           id: `hist-created-${Date.now()}`,
@@ -248,7 +268,20 @@ export const orderService = {
           previous_status: null,
           new_status: 'PENDING_PAYMENT',
           changed_by: 'CUSTOMER_CHECKOUT',
-          notes: 'Pedido gerado com agendamento de fornadas, aguardando pagamento',
+          notes:
+            input.payment_method === 'PAY_ON_DELIVERY' || input.payment_method === 'CASH_ON_DELIVERY'
+              ? `Pedido gerado com opção Pagar na Entrega (${
+                  input.delivery_payment_details?.subtype === 'DEBIT_CARD'
+                    ? 'Cartão de Débito'
+                    : input.delivery_payment_details?.subtype === 'CREDIT_CARD'
+                    ? 'Cartão de Crédito'
+                    : `Dinheiro${
+                        input.delivery_payment_details?.needs_change && input.delivery_payment_details?.change_for
+                          ? ` - Troco p/ R$ ${input.delivery_payment_details.change_for.toFixed(2)}`
+                          : ' - Sem troco'
+                      }`
+                })`
+              : 'Pedido gerado com agendamento de fornadas, aguardando pagamento',
           created_at: nowIso,
         },
       ],
